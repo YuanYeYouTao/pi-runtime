@@ -632,6 +632,43 @@ Live check:
 → 回答: "当前部署端口是 8080 …… 长期记忆里的 3000 已作废"
 ```
 
+## Event log: what is worth keeping
+
+Every RPC record used to be persisted verbatim. That is mostly streaming deltas: pi emits a
+`message_update` per text token and wraps turns in start/end pairs, which are useful live and
+useless afterwards — the finished answer is already stored as a conversation event.
+
+Measured cost: **19,313 of 19,738 rows (83 % of 7.5 MB)** over ~30 runs.
+
+| dropped | kept |
+|---|---|
+| `message_update`, `message_start`, `message_end` | `tool_execution_start` / `_end` (compacted) |
+| `turn_start`, `turn_end`, `agent_start` | `agent_end` (stop reason only) |
+| `tool_execution_update` (incremental tool output) | `error`, `usage`, `context_plan`, `context_conflict`, … |
+
+Two rules keep the remaining rows honest and small:
+
+- **Compaction at write time**: only the fields that carry information survive
+  (`toolName`, `toolCallId`, `isError`, output).
+- **Truncation with a marker**: a payload over 2,000 chars becomes
+  `{truncated: true, originalChars: N, preview: "…"}` — it never silently pretends the record
+  was always small.
+
+Result on this machine:
+
+```
+events   19738 行 / 7531 KB  →  302 行 / 197 KB
+database 10.80 MB            →  0.49 MB      (-95.5 %)
+```
+
+A fresh run now writes **7 rows / 1.1 KB** instead of ~750 rows, and `agent_end` is 51 bytes
+instead of 22 KB.
+
+```bash
+pi-rt compact --dry-run    # show what would go
+pi-rt compact --vacuum     # delete noise, truncate oversized payloads, reclaim space
+```
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

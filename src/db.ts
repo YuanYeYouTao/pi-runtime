@@ -219,6 +219,73 @@ export class Store {
     return this.db.prepare("SELECT seq, type, payload, created_at FROM events WHERE task_id = ? ORDER BY seq ASC").all(taskId) as any[];
   }
 
+  /** Row count and total payload bytes, for before/after reporting. */
+  eventStats(): { rows: number; bytes: number } {
+    const row = this.db.prepare("SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(payload)), 0) AS bytes FROM events").get() as {
+      rows: number;
+      bytes: number;
+    };
+    return { rows: Number(row.rows), bytes: Number(row.bytes) };
+  }
+
+  /**
+   * Remove records that carry no information after the fact (streaming deltas, turn wrappers).
+   * Destructive by design, so it counts first and never touches other types.
+   */
+  deleteEventsOfTypes(types: string[], dryRun = false): number {
+    if (types.length === 0) return 0;
+    const placeholders = types.map(() => "?").join(", ");
+    const count = this.db.prepare(`SELECT COUNT(*) AS n FROM events WHERE type IN (${placeholders})`).get(...types) as { n: number };
+    if (!dryRun) {
+      this.db.prepare(`DELETE FROM events WHERE type IN (${placeholders})`).run(...types);
+    }
+    return Number(count.n);
+  }
+
+  /** Reclaim the space freed by deletes. Returns the file size in bytes afterwards. */
+  vacuum(): number {
+    this.db.exec("VACUUM;");
+    const pages = this.db.prepare("PRAGMA page_count").get() as { page_count: number };
+    const size = this.db.prepare("PRAGMA page_size").get() as { page_size: number };
+    return Number(pages.page_count) * Number(size.page_size);
+  }
+
+  /**
+   * Shrink existing oversized payloads to a preview.
+   *
+   * New writes are bounded by `persistRecord`, but rows written before that guard still hold
+   * full agent payloads. The preview keeps the row honest: it says it was truncated and by how
+   * much, instead of silently pretending the record was always small.
+   */
+  truncateEventPayloads(maxChars: number): { rows: number; freedBytes: number } {
+    const rows = this.db.prepare("SELECT seq, payload FROM events WHERE LENGTH(payload) > ?").all(maxChars) as Array<{
+      seq: number;
+      payload: string;
+    }>;
+    const update = this.db.prepare("UPDATE events SET payload = ? WHERE seq = ?");
+    let freed = 0;
+    for (const row of rows) {
+      let replacement: string;
+      try {
+        const parsed = JSON.parse(row.payload);
+        replacement = JSON.stringify({
+          truncated: true,
+          originalChars: row.payload.length,
+          preview: JSON.stringify(parsed).slice(0, maxChars),
+        });
+      } catch {
+        replacement = JSON.stringify({
+          truncated: true,
+          originalChars: row.payload.length,
+          preview: row.payload.slice(0, maxChars),
+        });
+      }
+      freed += row.payload.length - replacement.length;
+      update.run(replacement, row.seq);
+    }
+    return { rows: rows.length, freedBytes: freed };
+  }
+
   /** Finished tasks that have not been fed to the memory extractor yet. */
   pendingTurns(thread?: string, limit = 12): TaskRow[] {
     const sql = thread

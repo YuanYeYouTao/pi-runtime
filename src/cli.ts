@@ -13,6 +13,7 @@ import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
+import { NOISE_TYPES } from "./event-log.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -48,6 +49,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts state promote <key> [--category fact] [--as <memory-key>]
   node src/cli.ts state del <key> [--scope <thread>]
   node src/cli.ts calibrate [--backfill] [--reset]   token 估算校准
+  node src/cli.ts compact [--dry-run] [--vacuum]    清理事件表里的流式增量
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -324,6 +326,37 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdCompact(args: string[]): number {
+  const vacuum = args.includes("--vacuum");
+  const dryRun = args.includes("--dry-run");
+  const store = new Store(DB_PATH);
+  try {
+    const maxPayload = Number(flagValue(args, "--payload-max") ?? 2000);
+    const before = store.eventStats();
+    const deleted = store.deleteEventsOfTypes(NOISE_TYPES, dryRun);
+    const shrunk = dryRun ? { rows: 0, freedBytes: 0 } : store.truncateEventPayloads(maxPayload);
+    const after = store.eventStats();
+
+    console.log(`events    ${before.rows} 行 / ${(before.bytes / 1024).toFixed(1)} KB`);
+    console.log(`${dryRun ? "将删除" : "已删除"}  ${deleted} 行（${NOISE_TYPES.join(", ")}）`);
+    console.log(`${dryRun ? "将截断" : "已截断"}  ${shrunk.rows} 条超长 payload，省下 ${(shrunk.freedBytes / 1024).toFixed(1)} KB`);
+    console.log(`现在      ${after.rows} 行 / ${(after.bytes / 1024).toFixed(1)} KB`);
+
+    if (dryRun) {
+      console.log("（预览模式，未做修改）");
+      return 0;
+    }
+    if (vacuum) {
+      console.log(`VACUUM 完成，数据库 ${(store.vacuum() / 1024 / 1024).toFixed(2)} MB`);
+    } else {
+      console.log("提示：加 --vacuum 回收磁盘空间");
+    }
+    return 0;
+  } finally {
+    store.close();
+  }
 }
 
 function cmdCalibrate(args: string[]): number {
@@ -861,6 +894,8 @@ async function main(): Promise<number> {
       return cmdState(rest);
     case "calibrate":
       return cmdCalibrate(rest);
+    case "compact":
+      return cmdCompact(rest);
     case "resolve":
       return cmdResolve(rest);
     case "forget":

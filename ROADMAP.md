@@ -124,6 +124,17 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > "它为什么答错了？" —— 看 `context_plan`。
 
+## Phase 2.8 — 事件表瘦身 ✅
+
+- [x] 写入侧过滤：流式增量与 turn 包装不入库（`src/event-log.ts`）
+- [x] 保留类型压缩为有效字段（tool 名称/结果/错误、agent 停止原因）
+- [x] 超长 payload 截断为 `{truncated, originalChars, preview}`，不假装数据原本就小
+- [x] `pi-rt compact [--dry-run] [--vacuum]`：删除噪音 → 截断历史超长行 → 回收空间
+- [x] 实测：19,738 行 / 7.5 MB → 302 行 / 197 KB；数据库 10.80 MB → **0.49 MB（-95.5%）**
+- [x] 新运行只写 7 行 / 1.1 KB（此前约 750 行）
+
+> 删之前先备份：`data/runtime.db.bak-before-compact`
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）

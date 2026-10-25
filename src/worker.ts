@@ -8,6 +8,7 @@ import { compose } from "./compose.ts";
 import type { ComposeSegment } from "./compose.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { CalibrationStore } from "./calibration.ts";
+import { persistRecord } from "./event-log.ts";
 import { extractStateDirectives } from "./state-directive.ts";
 import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
@@ -156,7 +157,9 @@ async function runAttempt(
   let promptChars = 0;
 
   rpc.on("record", (record: RpcRecord) => {
-    store.appendEvent(task.id, record.type, record);
+    // Only records that cannot be reconstructed are persisted; streaming deltas are dropped.
+    const persisted = persistRecord(record, cfg.eventPayloadMax ?? 2000);
+    if (persisted) store.appendEvent(task.id, persisted.type, persisted.payload);
 
     if (record.type === "message_update") {
       if (record.usage && typeof record.usage === "object") {
