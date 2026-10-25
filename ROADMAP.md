@@ -179,6 +179,20 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > 单次评测在这套用例上的噪声约 ±10 个百分点 —— 这就是必须跑多次的理由。
 
+## Phase 3.3 — 借鉴 Tobs 的三处改进 ✅
+
+读 [Tobs](https://github.com/BotHarness/DeepSeekBot) 的记忆实现后补的三件事：
+
+- [x] **按变化频率排序 prompt 段**（frozen → stable → volatile），manifest 记录 `cacheableChars`
+  - 实测：一次运行 551 字符里 **439 字符（80%）是可缓存前缀**
+  - `current` 强制视为 volatile（它每轮必变，不该进缓存前缀）
+- [x] **截断不再静默**：被裁剪的段追加一行说明（丢了多少字符），模型知道自己看到的不完整
+- [x] **记忆导出成 Git 仓库**：`pi-rt memory-git` → `data/memory-repo`
+  - `MEMORY.md` 索引 + 每条记忆一个带 front-matter 的 `.md`
+  - **文件里带证据引用**（`evidence_event_id` + 逐字引文），这是 Tobs 的记忆仓库没有的
+  - 无变化不提交；历史不重写（可 diff / 可回滚）
+- [x] 修复：`git rev-parse` 会向上找到父仓库，曾把投影提交进主仓库 —— 改为只检查目录内 `.git`
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）
