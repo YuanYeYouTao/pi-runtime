@@ -264,8 +264,9 @@ Every prompt is assembled as:
 
 ```
 ① 长期记忆（scoped, 1800 chars）
-② 最近对话（last N messages, 4000 chars）
-③ 当前消息
+② 更早对话的摘要（rolling, 1200 chars）
+③ 最近对话（last N messages, 4000 chars）
+④ 当前消息
 ```
 
 Two rules in `src/context.ts`:
@@ -279,8 +280,11 @@ The window is a *view*, not storage: events stay append-only, so compaction can 
 summarise the same rows without losing the originals.
 
 ```
-config.context.turns        6      how many messages
-config.context.budgetChars  4000   hard character cap
+config.context.turns               6      how many messages
+config.context.budgetChars         4000   hard character cap
+config.context.summary              true   rolling compression on/off
+config.context.summaryTriggerChars 2400   cold bytes that trigger a compression
+config.context.summaryMaxChars     1200   cap for the rendered summary
 ```
 
 Verified by an A/B on a fact that exists only in the previous turn:
@@ -294,6 +298,32 @@ turn 2  "那套轴体适合在开放式办公室用吗？"
 
 `context_injected` is recorded per task (`{ids, messages, chars}`), so "what did it actually
 see" is answerable after the fact.
+
+### Rolling summary
+
+The window is finite, so conversation eventually falls off the back of it. When the cold part
+of a thread (everything between the summary cursor and the window) exceeds
+`summaryTriggerChars`, it is compressed before the answer is generated:
+
+```
+thread_state { thread, summary, summarized_until_event_id }
+```
+
+- **Structured output**, not prose: 已确认事实 / 用户指令与偏好 / 未决问题 / 关键实体.
+- **Cursor advances only after success.** A failed compression leaves the cursor untouched, so
+  the same events are retried next turn instead of being silently dropped.
+- **The summary is a derived view.** Sources stay in `conversation_events`; a bad compression
+  can be recomputed rather than being permanent loss.
+- **A failed compression never fails the answer** — the run continues with the window alone.
+
+`pi-rt thread <thread>` shows the live state (event count, cursor, summary). Verified with a
+1-message window so the fact could only come from the summary:
+
+```
+turn 1  "项目代号是 Orion-7，负责人是王工。"
+turn 2  "这个项目下周要过安全评审。"      → summary cursor advances, 摘要含 Orion-7 / 王工
+turn 3  "这个项目的代号和负责人分别是什么？"  → "Orion-7，负责人王工。"
+```
 
 ## Evaluation
 

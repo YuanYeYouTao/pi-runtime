@@ -3,6 +3,7 @@ import type { RpcRecord } from "./rpc.ts";
 import type { Store, TaskRow } from "./db.ts";
 import type { MemoryStore } from "./memory.ts";
 import { buildConversationContext } from "./context.ts";
+import { summarizeThread } from "./summary.ts";
 import { PI_CLI, piArgs, piEnv } from "./config.ts";
 import type { RuntimeConfig } from "./config.ts";
 
@@ -84,9 +85,6 @@ export async function runTask(
   }, cfg.maxMinutes * 60_000);
 
   try {
-    rpc.start();
-    hooks.onStatus?.(`pi pid=${(rpc as any).child?.pid ?? "?"} cwd=${task.cwd}`);
-
     // The user's message becomes a numbered event before the run starts, so even a failed
     // run leaves evidence that the extraction step could bind to.
     if (hooks.recordUserEvent !== false) {
@@ -110,11 +108,48 @@ export async function runTask(
       hooks.onStatus?.(`context: 携带 ${context.messages} 条历史 / ${context.chars} 字符`);
     }
 
+    // Compress the cold part of the thread before answering: everything between the summary
+    // cursor and the newest window is unreachable otherwise, and chat drifts past the window
+    // quickly. Done before the main run so the summary is available to this prompt.
+    const state = store.threadState(task.thread);
+    let summary = state.summary;
+    if (cfg.summaryEnabled) {
+      const windowStart = context.ids.length > 0 ? context.ids[0] : lastId;
+      const cold = store.threadEventsBetween(task.thread, state.summarizedUntil, windowStart, 80);
+      const coldChars = cold.reduce((total, event) => total + event.text.length, 0);
+      if (cold.length > 0 && coldChars >= cfg.summaryTriggerChars) {
+        hooks.onStatus?.(`summary: 压缩 ${cold.length} 条较旧事件 / ${coldChars} 字符`);
+        try {
+          const updated = await summarizeThread(cfg, state.summary, cold, cfg.summaryMaxChars);
+          if (updated) {
+            const until = windowStart - 1;
+            store.saveThreadState(task.thread, updated, until);
+            store.appendEvent(task.id, "context_summarized", {
+              from: state.summarizedUntil,
+              to: until,
+              events: cold.length,
+              chars: updated.length,
+            });
+            summary = updated;
+            hooks.onStatus?.(`summary: 已更新到 #${until}（${updated.length} 字符）`);
+          }
+        } catch (error) {
+          // A failed compression must not fail the answer: the cursor stays put and the
+          // next run retries with the same cold events.
+          hooks.onStatus?.(`summary failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+
     const sections: string[] = [];
     if (injected.text) sections.push(injected.text);
+    if (summary.trim()) sections.push(`## 更早对话的摘要（已压缩，因果细节以最近对话为准）\n${summary.trim()}`);
     if (context.text) sections.push(`## 最近对话（同一会话，按时间顺序）\n${context.text}`);
     sections.push(`## 当前消息\n${task.prompt}`);
     const finalPrompt = sections.join("\n\n---\n\n");
+
+    rpc.start();
+    hooks.onStatus?.(`pi pid=${(rpc as any).child?.pid ?? "?"} cwd=${task.cwd}`);
 
     await rpc.prompt(finalPrompt, cfg.maxMinutes * 60_000 + 5_000);
 

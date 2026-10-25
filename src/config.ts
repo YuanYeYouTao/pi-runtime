@@ -52,6 +52,10 @@ export type RuntimeConfig = {
   /** Recent-message window carried into every prompt. */
   contextTurns: number;
   contextBudgetChars: number;
+  /** Rolling compression of the cold part of a thread. */
+  summaryEnabled: boolean;
+  summaryTriggerChars: number;
+  summaryMaxChars: number;
 };
 
 export function ensureDirs(): void {
@@ -84,6 +88,9 @@ export function loadConfig(): RuntimeConfig {
     },
     contextTurns: Number(process.env.PI_RT_CONTEXT_TURNS ?? raw.context?.turns ?? 6),
     contextBudgetChars: Number(process.env.PI_RT_CONTEXT_BUDGET ?? raw.context?.budgetChars ?? 4_000),
+    summaryEnabled: (process.env.PI_RT_SUMMARY ?? String(raw.context?.summary ?? true)) !== "false",
+    summaryTriggerChars: Number(process.env.PI_RT_SUMMARY_TRIGGER ?? raw.context?.summaryTriggerChars ?? 2_400),
+    summaryMaxChars: Number(process.env.PI_RT_SUMMARY_MAX ?? raw.context?.summaryMaxChars ?? 1_200),
   };
 }
 

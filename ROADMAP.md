@@ -59,7 +59,12 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 - [x] 每任务记录 `context_injected {ids, messages, chars}`，事后可查"它当时看到了什么"
 - [x] 8 项单测（顺序/标签/取最新/预算截断/空历史/角色过滤）
 - [x] A/B 验证：上一轮才出现的事实，带窗口能答对，空线程直接反问"请告诉我型号"
-- [ ] B 阶段：`thread_state` 摘要 + 触发压缩（窗口满 → 压成结构化摘要）
+- [x] B 阶段：`thread_state` 滚动摘要 + 游标 + 触发压缩
+  - [x] 结构化摘要（已确认事实 / 用户指令 / 未决问题 / 关键实体），≤1200 字符
+  - [x] 压缩失败不推进游标（可重试），且不影响当轮回答
+  - [x] 摘要是派生视图：源事件全量保留，可重算
+  - [x] `pi-rt thread <thread>` 查看游标与摘要
+  - [x] 验证：窗口缩到 1 条时，仍能仅凭摘要答出「Orion-7 / 王工」
 - [ ] 检索：优先用 bigram 相似度；FTS5 的 trigram 对 2 字中文失效（已实测）
 
 > "压缩会丢什么？你怎么验证没丢关键信息？"

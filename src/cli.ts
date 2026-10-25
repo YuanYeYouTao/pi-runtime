@@ -35,6 +35,7 @@ memory:
   node src/cli.ts memories [category] [--all]
   node src/cli.ts history <key>              full supersede / invalidate / contest chain
   node src/cli.ts events <thread>            the numbered conversation events
+  node src/cli.ts thread <thread>            rolling summary + compression cursor
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -313,6 +314,27 @@ function cmdResolve(args: string[]): number {
   return ok ? 0 : 1;
 }
 
+function cmdThread(args: string[]): number {
+  const thread = args[0];
+  if (!thread) {
+    console.error("usage: node src/cli.ts thread <thread>");
+    return 2;
+  }
+  const store = new Store(DB_PATH);
+  const state = store.threadState(thread);
+  const events = store.conversationEvents(thread, 500);
+  console.log(`thread      ${thread}`);
+  console.log(`events      ${events.length}`);
+  console.log(`cursor      #${state.summarizedUntil}`);
+  console.log(`summary     ${state.summary ? `${state.summary.length} 字符` : "(none)"}`);
+  if (state.summary) {
+    console.log("\n--- 摘要 ---");
+    console.log(state.summary);
+  }
+  store.close();
+  return 0;
+}
+
 function cmdEvents(args: string[]): number {
   const thread = args[0];
   if (!thread) {
@@ -505,10 +527,10 @@ async function cmdServe(args: string[]): Promise<number> {
 
     // Feishu family: the same handler, two transports. Sending replies always needs the
     // app credentials; receiving does too in WS mode, but webhook mode can run without them.
-    const appId = process.env.FEISHU_APP_ID;
-    const appSecret = process.env.FEISHU_APP_SECRET;
-    const encryptKey = process.env.FEISHU_ENCRYPT_KEY;
-    const verificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+    const appId = cfg.feishu.appId;
+    const appSecret = cfg.feishu.appSecret;
+    const encryptKey = cfg.feishu.encryptKey;
+    const verificationToken = cfg.feishu.verificationToken;
     const allowedChats = process.env.FEISHU_CHAT_ALLOW?.split(",").map((id) => id.trim()).filter(Boolean);
     const sender =
       appId && appSecret
@@ -699,6 +721,8 @@ async function main(): Promise<number> {
       return cmdHistory(rest);
     case "events":
       return cmdEvents(rest);
+    case "thread":
+      return cmdThread(rest);
     case "resolve":
       return cmdResolve(rest);
     case "forget":

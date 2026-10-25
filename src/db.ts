@@ -87,6 +87,17 @@ export class Store {
     `);
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_ce_thread ON conversation_events(thread, id);");
 
+    // Rolling summary per conversation: the events before `summarized_until_event_id` are
+    // represented by `summary`; the originals stay in conversation_events and can be re-read.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS thread_state (
+        thread                     TEXT PRIMARY KEY,
+        summary                    TEXT NOT NULL DEFAULT '',
+        summarized_until_event_id  INTEGER NOT NULL DEFAULT 0,
+        updated_at                 TEXT NOT NULL
+      );
+    `);
+
     // Transport-level idempotency: IM platforms redeliver when an ack is slow, and a
     // redelivered message must not become a second event (and therefore a second memory).
     this.db.exec(`
@@ -270,6 +281,33 @@ export class Store {
       .prepare("SELECT * FROM conversation_events WHERE thread = ? AND id < ? ORDER BY id DESC LIMIT ?")
       .all(thread, beforeId, limit)
       .reverse() as ConversationEventRow[];
+  }
+
+  /** Events in an id range, oldest first (used to compress the cold part of a thread). */
+  threadEventsBetween(thread: string, afterId: number, beforeId: number, limit = 80): ConversationEventRow[] {
+    return this.db
+      .prepare("SELECT * FROM conversation_events WHERE thread = ? AND id > ? AND id < ? ORDER BY id ASC LIMIT ?")
+      .all(thread, afterId, beforeId, limit) as ConversationEventRow[];
+  }
+
+  threadState(thread: string): { summary: string; summarizedUntil: number } {
+    const row = this.db.prepare("SELECT * FROM thread_state WHERE thread = ?").get(thread) as
+      | { summary: string; summarized_until_event_id: number }
+      | undefined;
+    return { summary: row?.summary ?? "", summarizedUntil: Number(row?.summarized_until_event_id ?? 0) };
+  }
+
+  saveThreadState(thread: string, summary: string, summarizedUntil: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO thread_state (thread, summary, summarized_until_event_id, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(thread) DO UPDATE SET
+           summary = excluded.summary,
+           summarized_until_event_id = excluded.summarized_until_event_id,
+           updated_at = excluded.updated_at`,
+      )
+      .run(thread, summary, summarizedUntil, now());
   }
 
   pendingEvents(thread?: string, limit = 40): ConversationEventRow[] {

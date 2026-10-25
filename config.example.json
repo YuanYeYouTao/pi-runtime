@@ -10,7 +10,10 @@
   },
   "context": {
     "turns": 6,
-    "budgetChars": 4000
+    "budgetChars": 4000,
+    "summary": true,
+    "summaryTriggerChars": 2400,
+    "summaryMaxChars": 1200
   },
   "feishu": {
     "appId": "cli_xxxxxxxxxxxx",
