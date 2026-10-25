@@ -1,4 +1,5 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
+import { createDecipheriv, createHash, timingSafeEqual } from "node:crypto";
 import type { Incoming } from "../gateway.ts";
 
 export type FeishuOptions = {
@@ -94,14 +95,18 @@ export class FeishuChannel {
   close(): void {
     this.ws?.close({ force: true });
   }
+
+  /** Public wrapper so the webhook transport can reuse the same name cache. */
+  nameFor(openId: string): Promise<string> {
+    return this.displayName(openId);
+  }
 }
 
 /**
  * Normalization is exported so it can be tested without credentials: the payload shape is
  * the part that breaks when Feishu changes schema or when a message is not plain text.
  */
-export function parseFeishuMessage(payload: any): Incoming | null {
-  const event = payload?.event ?? payload;
+export function parseFeishuMessage(payload: any): Incoming | null {  const event = payload?.event ?? payload;
   const message = event?.message;
   const sender = event?.sender;
   if (!message?.chat_id || typeof message.content !== "string") return null;
@@ -131,4 +136,54 @@ export function parseFeishuMessage(payload: any): Incoming | null {
     messageId: message.message_id ? String(message.message_id) : undefined,
     timestamp: message.create_time ? new Date(Number(message.create_time)).toISOString() : undefined,
   };
+}
+
+/** Feishu's URL-verification handshake: echo the challenge back, nothing else. */
+export function isUrlVerification(payload: any): boolean {
+  return payload?.type === "url_verification" && typeof payload?.challenge === "string";
+}
+
+/**
+ * Feishu signs webhook deliveries with sha256(timestamp + nonce + encryptKey + body).
+ * Without an encryptKey there is no signature to check, which is why the console should
+ * set one for anything reachable from the internet.
+ */
+export function verifyFeishuSignature(
+  headers: Record<string, string | undefined>,
+  rawBody: string,
+  encryptKey: string,
+): boolean {
+  const timestamp = headers["x-lark-request-timestamp"];
+  const nonce = headers["x-lark-request-nonce"];
+  const signature = headers["x-lark-signature"];
+  if (!timestamp || !nonce || !signature) return false;
+
+  const expected = createHash("sha256").update(timestamp + nonce + encryptKey + rawBody).digest("hex");
+  const left = Buffer.from(expected, "utf8");
+  const right = Buffer.from(signature, "utf8");
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/**
+ * Feishu encrypts the whole payload when an encrypt key is configured:
+ * AES-256-CBC, key = sha256(encryptKey), IV = first 16 bytes of the ciphertext.
+ */
+export function decryptFeishuPayload(encrypted: string, encryptKey: string): any {
+  const key = createHash("sha256").update(encryptKey).digest();
+  const buffer = Buffer.from(encrypted, "base64");
+  if (buffer.length <= 16) throw new Error("encrypted payload too short");
+  const iv = buffer.subarray(0, 16);
+  const decipher = createDecipheriv("aes-256-cbc", key, iv);
+  const plain = Buffer.concat([decipher.update(buffer.subarray(16)), decipher.final()]).toString("utf8");
+  return JSON.parse(plain);
+}
+
+/** Accepts either a plain record or an `{encrypt}` envelope. */
+export function unwrapFeishuPayload(body: string, encryptKey?: string): any {
+  const parsed = JSON.parse(body);
+  if (parsed && typeof parsed.encrypt === "string") {
+    if (!encryptKey) throw new Error("payload is encrypted but no encryptKey is configured");
+    return decryptFeishuPayload(parsed.encrypt, encryptKey);
+  }
+  return parsed;
 }

@@ -14,6 +14,7 @@ import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
 import { TelegramChannel } from "./channels/telegram.ts";
 import { FeishuChannel } from "./channels/feishu.ts";
+import { startFeishuWebhook } from "./channels/feishu-webhook.ts";
 
 const USAGE = `pi-runtime — a personal agent runtime built on pi
 
@@ -46,6 +47,8 @@ channels:
   node src/cli.ts members                    known identities
   node src/cli.ts serve --channel telegram    long-poll Telegram (needs TELEGRAM_BOT_TOKEN)
   node src/cli.ts serve --channel feishu      Feishu long connection (needs FEISHU_APP_ID/SECRET)
+  node src/cli.ts serve --channel feishu-webhook [--port 8787]
+                                             Feishu webhook mode (testable locally)
 
 env / config.json:
   PI_RT_WORKSPACE   folder the agent works in   (default: cwd)
@@ -496,25 +499,50 @@ async function cmdServe(args: string[]): Promise<number> {
       });
       console.log("telegram polling — ctrl+c to stop");
       await telegram.serve((message) => handler(message, (chatId, text) => telegram.send(chatId, text)), controller.signal);
-    } else {
-      const appId = process.env.FEISHU_APP_ID;
-      const appSecret = process.env.FEISHU_APP_SECRET;
-      if (!appId || !appSecret) {
-        console.error("set FEISHU_APP_ID / FEISHU_APP_SECRET first (open.feishu.cn → 开发者后台 → 应用凭证)");
-        return 1;
-      }
-      const feishu = new FeishuChannel({
-        appId,
-        appSecret,
-        encryptKey: process.env.FEISHU_ENCRYPT_KEY,
-        verificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
-        allowedChats: process.env.FEISHU_CHAT_ALLOW?.split(",").map((id) => id.trim()).filter(Boolean),
-      });
-      console.log("feishu long connection starting — ctrl+c to stop");
-      await feishu.serve((message) => handler(message, (chatId, text) => feishu.send(chatId, text)));
-      await new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve()));
-      feishu.close();
+      return 0;
     }
+
+    // Feishu family: the same handler, two transports. Sending replies always needs the
+    // app credentials; receiving does too in WS mode, but webhook mode can run without them.
+    const appId = process.env.FEISHU_APP_ID;
+    const appSecret = process.env.FEISHU_APP_SECRET;
+    const encryptKey = process.env.FEISHU_ENCRYPT_KEY;
+    const verificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+    const allowedChats = process.env.FEISHU_CHAT_ALLOW?.split(",").map((id) => id.trim()).filter(Boolean);
+    const sender =
+      appId && appSecret
+        ? new FeishuChannel({ appId, appSecret, encryptKey, verificationToken, allowedChats })
+        : null;
+
+    if (channel === "feishu-webhook") {
+      const port = Number(process.env.FEISHU_WEBHOOK_PORT ?? 8787);
+      const server = await startFeishuWebhook({
+        port,
+        encryptKey,
+        verificationToken,
+        allowedChats,
+        resolveName: sender ? (openId) => sender.nameFor(openId) : undefined,
+        onMessage: (message) =>
+          handler(message, async (_chatId, text) => {
+            if (sender) await sender.send(message.chatId, text);
+            else console.log(`[reply suppressed — no app credentials]\n${text}`);
+          }),
+      });
+      console.log(`feishu webhook listening on http://127.0.0.1:${server.port}/feishu/event`);
+      console.log(sender ? "replies: enabled" : "replies: disabled (set FEISHU_APP_ID / FEISHU_APP_SECRET)");
+      await new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve()));
+      await server.close();
+      return 0;
+    }
+
+    if (!appId || !appSecret) {
+      console.error("set FEISHU_APP_ID / FEISHU_APP_SECRET first (open.feishu.cn → 开发者后台 → 应用凭证)");
+      return 1;
+    }
+    console.log("feishu long connection starting — ctrl+c to stop");
+    await sender!.serve((message) => handler(message, (chatId, text) => sender!.send(chatId, text)));
+    await new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve()));
+    sender!.close();
     return 0;
   } finally {
     memory.close();
