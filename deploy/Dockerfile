@@ -13,12 +13,11 @@ COPY package.json package-lock.json ./
 ARG NPM_REGISTRY=https://registry.npmjs.org
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --registry=$NPM_REGISTRY
 
+# No apt layer on purpose: `node:*-slim` already ships ca-certificates, and `safe` mode has no
+# shell tool, so git/curl would only add a slow download (minutes per package behind a slow
+# Debian mirror) and 113 MB for nothing. Mount extra tooling if you ever need `full` mode.
 FROM node:24-bookworm-slim
-# git/curl are for the agent's own tools when sandbox mode is `full`; harmless otherwise.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl \
- && rm -rf /var/lib/apt/lists/* \
- && useradd -m -u 10001 agent
+RUN useradd -m -u 10001 agent
 
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
