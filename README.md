@@ -1,104 +1,104 @@
 # pi-runtime
 
-A personal agent runtime built on top of the **pi** coding agent (`@earendil-works/pi-coding-agent`), the same way a platform team would wrap an agent kernel.
+一个跑在 **pi** 编码 agent（`@earendil-works/pi-coding-agent`）之上的个人助理运行时 —— 像平台团队封装 agent 内核那样封装它。
 
-The point of this project is not "chat with an AI on my laptop". It is to own the three things a chat wrapper does not have:
+这个项目的重点不是"在自己的电脑上跟 AI 聊天"，而是拿到聊天壳子没有的三样东西：
 
-1. **State** — every task, every event, every result survives a crash.
-2. **A boundary** — the executor is a disposable subprocess with no database and no port.
-3. **A seam** — the agent kernel is swappable, so the platform logic stays ours.
+1. **状态** —— 每个任务、每条事件、每个结果都能扛住崩溃。
+2. **边界** —— 执行器是一次性子进程，没有数据库、不占端口。
+3. **接缝** —— agent 内核可替换，平台逻辑始终是自己的。
 
-## Architecture
+## 架构
 
 ```
-        you (CLI today, web / IM later)
+        你（现在 CLI，之后 Web / IM）
                     │
                     ▼
         ┌───────────────────────────┐
-        │  orchestrator (this repo) │  ← the only stateful part
+        │  编排层（本仓库）          │  ← 唯一有状态的部分
         │  tasks · events · queue   │
         │  SQLite (data/runtime.db) │
         └───────────┬───────────────┘
                     │ stdin JSONL  ▲ stdout JSONL
                     ▼              │
         ┌───────────────────────────┐
-        │  pi --mode rpc            │  ← stateless, no db, no port
+        │  pi --mode rpc            │  ← 无状态、无数据库、无端口
         │  prompt · tools · stream  │
         └───────────┬───────────────┘
                     │
                     ▼
         ┌───────────────────────────┐
-        │  workspace (files on disk)│  ← the real side effects
+        │  workspace（磁盘上的文件）  │  ← 真正的副作用发生在这里
         └───────────────────────────┘
 ```
 
-Why the split matters: the executor can be killed, restarted, containerized or swapped for another agent, and the queue keeps its place. This is the same decision the systems we studied make (backend = only stateful hub, runner = no database / no port).
+为什么要这样切：执行器可以被杀掉、重启、装进容器、甚至换成另一个 agent，而队列的位置不会丢。
 
-## Quick start
+## 快速开始
 
 ```bash
-# 1. deps (--ignore-scripts: pi needs no lifecycle scripts, and sandboxes often block them)
+# 1. 装依赖（--ignore-scripts：pi 不需要生命周期脚本，沙箱里常被拦截）
 npm install --ignore-scripts
 
-# 2. bind a model (writes credentials to data/pi, NOT ~/.pi)
+# 2. 绑定模型（凭证写到 data/pi，不是 ~/.pi）
 node src/cli.ts login
 
-# 3. check the pipe
+# 3. 检查管道
 node src/cli.ts doctor
 
-# 4. run a task in the current folder
-node src/cli.ts ask "summarize what this repository does" --cwd .
+# 4. 在当前目录跑一个任务
+node src/cli.ts ask "总结一下这个仓库是做什么的" --cwd .
 
-# 5. or run a daemon that drains the queue
+# 5. 或者起一个消费队列的守护进程
 node src/cli.ts worker
 ```
 
-Then, from another terminal, enqueue work without running it inline:
+## 常用命令
 
-```bash
-node -e "import('./src/db.ts').then(({Store})=>{const s=new Store('data/runtime.db');console.log(s.createTask('list the TODO comments','.'))})"
-node src/cli.ts worker --once
-```
-
-## Commands
-
-| Command | What it does |
+| 命令 | 作用 |
 |---|---|
-| `doctor` | handshake with pi, print session id / model / compaction state |
-| `login` | run pi's `/login` against the isolated config dir |
-| `ask "<prompt>"` | enqueue + run one task now, stream the output |
-| `worker [--once]` | daemon: claim queued tasks one at a time, crash-safe |
-| `list [n]` | recent tasks with status |
-| `show <id>` | one task, its result and its event trail |
-| `remember "<text>" --key <slot> [--category …] [--importance 1-5] [--evidence "…"]` | write a memory by hand |
-| `memories [category] [--all]` | list memories (active by default) |
-| `history <key>` | the full supersede / invalidate chain for one slot |
-| `forget <id>` | hard-delete one row |
-| `distill [--thread t] [--limit n]` | batch-extract memories from undistilled turns |
-| `stats` | task + memory counters |
-| `ask "…" --thread <t>` | keep turns in a conversation thread |
+| `doctor` | 与 pi 握手，打印 session id / 模型 / 压缩状态 |
+| `login` | 在隔离的配置目录里跑 pi 的登录 |
+| `ask "<prompt>"` | 入队并立刻执行一个任务，流式输出 |
+| `worker [--once]` | 守护进程：逐个领取队列任务，崩溃安全 |
+| `list [n]` | 最近任务及状态 |
+| `show <id>` | 单个任务的结果与事件轨迹 |
+| `remember "<text>" --key <slot>` | 手工写入一条记忆 |
+| `memories [category] [--all]` | 列出记忆（默认只看 active） |
+| `history <key>` | 某个槽位的完整覆盖 / 作废链 |
+| `forget <id>` | 硬删除一行 |
+| `distill [--thread t]` | 从尚未提炼的对话里批量抽取记忆 |
+| `state set/list/promote/del` | 短期状态（带 TTL） |
+| `archive` / `backup` | 归档旧事件 / 压缩快照数据库 |
+| `compact` | 清理事件表里的流式增量 |
+| `calibrate` | 用真实用量校准 token 估算 |
+| `sandbox` | 查看当前工具能力策略 |
+| `eval [--cases f] [--repeat n]` | 跑记忆抽取评测 |
+| `serve --channel <c>` | 起服务：telegram / feishu / feishu-webhook |
 
-## Memory
+## 记忆
 
-Three layers: **evidence → target → verdict**.
+三层：**证据 → 主体 → 裁决**。
 
-| category | for |
+| 类别 | 用于 |
 |---|---|
 | `preference` | 长期稳定的个人偏好（饮食、作息、称呼、回答风格…） |
 | `fact` | 长期稳定的客观事实（工作、技术栈、设备、常住地…） |
 | `event` | 重要的单次事件与长期承诺（离职、复盘约定…） |
 
-### Layer 1 — every memory is bound to a numbered event
+### 第一层：每条记忆都绑到一条编号事件
 
-Conversation is stored append-only in `conversation_events` (`#1024 | user_1 | role | text`). The extractor never sees a plain transcript; it sees numbered lines, and must return:
+对话以追加方式存在 `conversation_events`（`#1024 | user_1 | role | text`）。抽取器看到的不是纯文本，而是带编号的行，且必须返回：
 
 ```json
 { "evidence_event_id": 1024, "evidence_quote": "我平时只喝美式，不加糖" }
 ```
 
-The quote is checked as a normalized substring of **that specific event**, not of the whole transcript. A quote that belongs to a neighbouring message is rejected — which is what stops a plausible-sounding memory from attaching to the wrong sentence.
+引文会被校验为**那一条事件**的归一化子串，而不是整段对话的子串。引文属于隔壁那条消息就会被拒 —— 这正是"听起来合理但其实张冠李戴"被挡住的地方。
 
-### Layer 2 — structured targets, no pronouns
+**并且来源必须是用户消息。** 助手的复述、猜测、编造都不算证据；否则模型可以把自己的猜测洗成关于用户的事实（这个缺陷在留出集里被抓到过，见"评测"一节）。
+
+### 第二层：结构化主体，禁用代词
 
 ```json
 "target": { "type": "current_speaker" }
@@ -107,524 +107,249 @@ The quote is checked as a normalized substring of **that specific event**, not o
 "target": { "type": "self" }
 ```
 
-`named_member` requires a name. The prompt states the attribution rule explicitly ("张三说李四不吃辣" → 李四) and forbids 他/她/用户. Storage keeps `target_type` + `target_name`, and derives `subject` (`Rick` / `member:张三` / `group` / `agent`) for keys, injection and filtering.
+`named_member` 必须给名字。提示词里写死了归属规则（"张三说李四不吃辣" → 李四），并禁止 他/她/用户。存储保留 `target_type` + `target_name`，并派生 `subject`（`Rick` / `member:张三` / `group` / `agent`）用于建键、注入和过滤。
 
-### Owner
+### Owner（主人）是配置出来的，不是猜出来的
 
-`ownerName` in `config.json` (default **Rick**, override with `PI_RT_OWNER`) is the canonical subject for `current_speaker`. Two consequences:
+`config.json` 里的 `ownerName`（默认 **Rick**，可用 `PI_RT_OWNER` 覆盖）是 `current_speaker` 的规范主体。两个后果：
 
-- Existing `subject = "user"` rows are rewritten to the owner name on startup, so the rename is a migration, not a display tweak.
-- Ownership is **configured at ingest, never inferred**. The first implementation promoted "whoever spoke first" to owner, which meant renaming the owner renamed that group member — and silently made 张三 the owner of an agent belonging to Rick. `ensureOwner()` now matches by name and no longer demotes other identities.
+- 历史行里的 `subject = "user"` 会在启动时改写成 owner 名，所以改名是一次迁移，不是显示调整。
+- 归属**在接入时配置，绝不推断**。最早的实现把"第一个说话的人"提升为 owner，结果改主人名会把那个群成员也改名 —— 于是一个本该属于 Rick 的 agent，悄悄把张三变成了主人。`ensureOwner()` 现在按名字匹配，并且不会把其他身份降级。
 
-One person, several channels, one subject:
+一个人、多个渠道、一个主体：
 
-- `PI_RT_OWNER_IDS` (or `ownerIds` in config) lists channel ids that also belong to the owner, for when the profile name is not "Rick" (a Feishu contact name, a Telegram handle).
-- `members.is_owner` therefore means "this identity belongs to the owner", and several rows may carry it.
-- Distillation collapses every owner identity into one subject: a message from Rick's Feishu account is stored as `subject = Rick`, not `member:陈涛`. Without this, the same person gets two memory slots and the agent forgets half of what it knows.
+- `PI_RT_OWNER_IDS`（或 config 里的 `ownerIds`）列出也属于主人的渠道 id，用于档案名不是 "Rick" 的场景（飞书昵称、Telegram handle）。
+- 因此 `members.is_owner` 的含义是"这个身份属于主人"，可以有多行。
+- 提炼时把所有 owner 身份折叠成同一主体：来自 Rick 飞书账号的消息存成 `subject = Rick`，不是 `member:陈涛`。否则同一个人会占两个记忆槽，agent 会忘掉一半。
 
-### Layer 3 — four verdicts, decided against DB state
+### 第三层：四种裁决，由数据库状态决定
 
-| action | meaning | requires |
+| 动作 | 含义 | 需要 |
 |---|---|---|
-| `create` | new slot | — |
-| `correct` | value replaced (搬家/换工作/改偏好) | `target_fact_id` |
-| `invalidate` | retracted, no replacement | `target_fact_id` |
-| `contest` | conflicting, cannot decide which is true | `target_fact_id` |
+| `create` | 新槽位 | — |
+| `correct` | 值被替换（搬家 / 换工作 / 改偏好） | `target_fact_id` |
+| `invalidate` | 被撤回，无替代 | `target_fact_id` |
+| `contest` | 相互冲突，无法判断哪个为真 | `target_fact_id` |
 
-The extractor is handed the current state (`[ID: 42 | key: … | state: active]`), so it can point at a specific row. The DB then verifies that row exists and is active, and may still overrule the proposal:
+抽取器会拿到当前状态（`[ID: 42 | key: … | state: active]`），因此能指向具体一行。数据库再校验这一行确实存在且是 active，并且仍可能驳回提案：
 
-- `create` on an existing key → `correct` on that row
-- `create` near-duplicate (≥ 0.82 bigram-Jaccard) → `correct`, adopting the existing key
-- `correct` without a usable target → `create`
-- `invalidate` / `contest` without a usable target → rejected
+- 对已存在的 key 做 `create` → 变成对该行的 `correct`
+- `create` 近似重复（bigram-Jaccard ≥ 0.82）→ 变成 `correct`，并沿用已有 key
+- `correct` 但没有可用目标 → 降级为 `create`
+- `invalidate` / `contest` 但没有可用目标 → 拒绝
 
-Only one `active` row per key (partial unique index). History is status-tagged (`superseded` / `invalidated` / `contested`) and never deleted.
+同一个 key 只有一行 `active`（部分唯一索引）。历史以状态标记（`superseded` / `invalidated` / `contested`），永不删除。
 
-**Contested rows are not injected.** A fact under dispute is not a fact; feeding it to the agent as truth is worse than saying nothing. Adjudicate with `pi-rt resolve <key> <keep-id>`.
+**争议中的行不会被注入。** 有争议的事实不是事实；把它当真相喂给模型，比什么都不说更糟。用 `pi-rt resolve <key> <keep-id>` 人工裁决。
 
-### Batched, not per-message
+### 批量提炼，不是逐条
 
-- **Threshold.** After `batchTurns` (default 10) undistilled turns, `ask` distils at the end of the run.
-- **Idle.** `worker` distils threads whose newest undistilled event is older than `idleMinutes` (default 15).
-- **Retryable.** Unparseable output does not mark events distilled, so the next batch retries them.
+- **阈值**：累计 `batchTurns`（默认 10）轮未提炼的对话后，`ask` 在结束时提炼。
+- **闲置**：`worker` / `serve` 会提炼"最新未提炼事件超过 `idleMinutes`（默认 15）"的线程。
+- **可重试**：无法解析的输出**不会**标记为已提炼，下一批会重来。
 
-### Scope: a chat is not a codebase
+### 作用域：聊天记录不是代码库
 
-The same store holds project facts and personal facts, so injection is scoped by thread:
-a row extracted from `feishu:oc_x` is only injected into that conversation, hand-written
-rows (`thread IS NULL`) apply everywhere, and project memories stay in their own thread.
+同一个库里既有项目事实也有个人事实，所以注入按线程隔离：从 `feishu:oc_x` 抽出的行只会注入那个会话，手写的行（`thread IS NULL`）全局生效，项目记忆待在自己的线程里。
 
-Without this, a question like "我在戒咖啡" gets injected with notes about the RPC transport
-and the agent answers about code — then that reply is recorded as an event and distilled
-into a bogus "fact" about the codebase. That is exactly what the first end-to-end Feishu run
-produced, which is why scoping exists.
+没有这个隔离时，"我在戒咖啡"会被注入一堆 RPC 传输层的笔记，然后 agent 就开始聊代码 —— 而那段回复又被记成事件、提炼成关于代码库的"事实"。第一次飞书端到端跑出来的正是这个结果，所以才有作用域。
 
-Two more guards came out of that same run:
+同一次运行还暴露出两件事：
 
-- **Subjects do not share a slot.** Similarity-based dedupe is filtered by `subject`, so two
-  people who both avoid cilantro get two memories instead of one overwriting the other.
-- **`target_fact_id` must be in the reference set** that was actually shown to the extractor.
-  Otherwise a model that invents an id can reach a row outside this conversation and rewrite
-  someone else's memory — which is what happened before the allowlist existed.
+- **不同主体不共享槽位**：相似度去重按 `subject` 过滤，两个都讨厌香菜的人得到两条记忆，而不是互相覆盖。
+- **`target_fact_id` 必须在实际展示给抽取器的参考集里**：否则模型编造一个 id 就能改到会话之外的行、改写别人的记忆 —— 加白名单之前确实发生过。
 
-### Injection
+### 注入
 
-Active rows only, ranked by `importance` then recency, cut at 1800 chars, injected at **run time** so a queued task sees memory as it is when it actually runs.
+只用 active 行，按 `importance` 再按新近度排序，截断在 1800 字符，并且是在**运行那一刻**注入，所以排队的任务看到的是它真正执行时的记忆。
 
 ```bash
-node src/cli.ts events main                                   # numbered evidence
-node src/cli.ts remember "默认使用 bash" --key user_shell --category fact --target self --event 12
-node src/cli.ts distill --thread main
-node src/cli.ts history user_shell                            # full verdict chain
-node src/cli.ts resolve user_birth_city 7                     # settle a contested slot
+node src/cli.ts events main                     # 带编号的证据
+node src/cli.ts remember "默认使用 bash" --key user_shell --category fact --target self
+node src/cli.ts history user_shell              # 完整裁决链
+node src/cli.ts resolve user_birth_city 7       # 裁决争议槽位
 ```
 
-## Channels
+## 通道
 
-One ingest path, several transports. A message becomes a numbered event **before** any model call, so evidence survives a failed reply.
+一条接入路径，多种传输。消息在任何模型调用**之前**就变成编号事件，所以即使回复失败，证据仍然留存。
 
 ```
-chat message → Members (identity) → conversation_event (#id) → task → pi → reply → event again
+聊天消息 → Members（身份）→ conversation_event (#id) → task → pi → 回复 → 再记一条事件
 ```
 
-| transport | status | notes |
+| 传输 | 状态 | 说明 |
 |---|---|---|
-| `feed` (local) | working | `--as <name>` simulates a speaker; used for tests and demos |
-| `telegram` | working | long polling, no public URL; needs `TELEGRAM_BOT_TOKEN` |
-| `feishu` | working | long connection (no public URL); needs `FEISHU_APP_ID` / `FEISHU_APP_SECRET` |
-| others | seam only | plug into `ingest()` — see `src/gateway.ts` |
+| `feed`（本地） | 可用 | `--as <name>` 模拟说话人，用于测试与演示 |
+| `telegram` | 可用 | 长轮询，不需要公网地址；需要 `TELEGRAM_BOT_TOKEN` |
+| `feishu` | 可用 | 长连接（不需要公网地址）；需要 app id / secret |
+| 其他 | 只留接口 | 接到 `ingest()` 上，见 `src/gateway.ts` |
 
-```bash
-node src/cli.ts feed "我不吃香菜" --as 李四 --chat g1        # ingest as a specific speaker
-node src/cli.ts feed "我在上海做芯片验证" --as 张三 --chat g1 --run   # ingest + let pi reply
-node src/cli.ts members                                     # identity table
-TELEGRAM_BOT_TOKEN=... node src/cli.ts serve --channel telegram
-FEISHU_APP_ID=... FEISHU_APP_SECRET=... node src/cli.ts serve --channel feishu
-```
+### 飞书接入步骤
 
-### Feishu setup
 1. [open.feishu.cn](https://open.feishu.cn) → 开发者后台 → 创建**企业自建应用**
 2. 添加应用能力 → **机器人**
-3. 权限：`im:message`（接收）、`im:message:send_as_bot`（发送）；想要真实姓名再加 `contact:user.base:readonly`（不加则用 open_id 当名字）
+3. 权限：`im:message`（接收）、`im:message:send_as_bot`（发送）；想要真实姓名再加 `contact:user.base:readonly`
 4. 事件与回调 → 订阅方式选 **使用长连接接收事件** → 添加事件 `im.message.receive_v1`
 5. 创建版本并发布，管理员审核通过
-6. 把机器人加进目标群，然后：
+6. 把机器人加进目标会话，然后 `pi-rt serve --channel feishu`
 
-```bat
-set FEISHU_APP_ID=cli_xxx
-set FEISHU_APP_SECRET=xxx
-pi-rt.cmd serve --channel feishu
-```
+选长连接是刻意的：个人助理躲在 NAT 后面，webhook 需要隧道、域名和证书。代价是控制台必须设成长连接模式。
 
-Long connection is chosen on purpose: the agent runs behind NAT, so a webhook would need a tunnel. The cost is that the console must be set to long-connection mode — a webhook deployment would replace `serve()` with an HTTP handler and reuse `parseFeishuMessage()`.
+当前限制：只接入 `text` 消息（富文本 `post`、图片、文件会跳过而不是硬解析）；@ 提及会被剥离；没有通讯录权限时显示名回退成 open_id。
 
-Limits today: only `text` messages are ingested (rich text `post`, images, files are skipped rather than mis-parsed); mentions are stripped (`@_user_1`); display names fall back to `open_id` without the contact scope.
+### 飞书的两种传输
 
-### Two Feishu transports
-
-| mode | needs | use when |
+| 模式 | 需要 | 何时用 |
 |---|---|---|
-| `serve --channel feishu` | app credentials | the console is set to 长连接; no public address needed |
-| `serve --channel feishu-webhook` | `FEISHU_ENCRYPT_KEY` for signature checks | you have a public URL, or you want to test locally |
+| `serve --channel feishu` | 应用凭证 | 控制台设了长连接，不需要公网地址 |
+| `serve --channel feishu-webhook` | `FEISHU_ENCRYPT_KEY` 做验签 | 有公网地址，或想在本地测 |
 
-The webhook transport exists because the long connection cannot be exercised without a real
-app. `feishu-webhook` runs an HTTP server that accepts the same events, so the whole pipeline
-(parse → identity → event → run → reply) can be verified on localhost:
+webhook 传输存在的理由是：没有真实应用就无法演练长连接。它会校验 `sha256(timestamp + nonce + encryptKey + body)`，解密 `{encrypt}` 信封（AES-256-CBC，key = sha256(encryptKey)，IV = 前 16 字节），应答 `url_verification`，并且**先回 200 再跑 agent** —— 飞书会重投慢响应，重投就会变成第二条消息、第二条记忆。
 
-```bash
-FEISHU_WEBHOOK_PORT=8787 node src/cli.ts serve --channel feishu-webhook
-node tests/feishu-e2e.mjs 8787 oc_fresh   # post simulated deliveries
-```
+### 幂等
 
-It verifies `sha256(timestamp + nonce + encryptKey + body)` before trusting a delivery,
-decrypts the `{encrypt}` envelope (AES-256-CBC, key = sha256(encryptKey), IV = first 16 bytes),
-answers `url_verification` with the challenge, and **acks with 200 before running the agent** —
-Feishu retries slow or non-2xx deliveries, and a retry would otherwise become a second message
-and a second memory.
-
-### Idempotency
-
-IM platforms redeliver when an ack is slow. `claimMessage(channel, message_id)` records the transport id before the event is created, so a redelivered message is dropped instead of producing a second event — and therefore a second memory. Covered by `tests/channels.test.mjs`.
+IM 平台在 ack 慢时会重投。`claimMessage(channel, message_id)` 在创建事件之前记下传输层 id，所以重投会被丢掉，而不是产生第二条事件（进而第二条记忆）。
 
 ```bash
-node tests/channels.test.mjs        # 9 checks: parsing, mentions, post/empty/broken payloads, dedupe
-node tests/feishu-webhook.test.mjs  # 13 checks: signature, decrypt, challenge, ack, token, encrypted event
+node tests/channels.test.mjs        # 9 项：解析、提及、富文本/空/坏载荷、去重
+node tests/feishu-webhook.test.mjs  # 13 项：验签、解密、challenge、ack、token、加密事件
 ```
 
-Why polling for Telegram: a personal agent lives behind NAT on a laptop, so a webhook would need a tunnel — one more moving part for no benefit. The update cursor is in memory, so a restart re-delivers at most one message.
+## 上下文
 
-Identity matters because `current_speaker` is relative to the event. Without `Members`, two people's facts collapse into one `user` slot; with it, each row carries `member:张三` or `member:李四`, and the extractor is told who is speaking in each line.
+记忆是 agent 永远知道的东西，上下文是它这一轮还能看见的东西 —— 两套不同机制。
 
-## Context
-
-Memory is what the agent knows forever; context is what it can still see. They are different
-mechanisms, and this runtime had neither until the window was added.
-
-Every prompt is assembled as:
+每次的 prompt 这样组装：
 
 ```
-① 长期记忆（scoped, 1800 chars）
-② 更早对话的摘要（rolling, 1200 chars）
-③ 最近对话（last N messages, 4000 chars）
-④ 当前消息
+① 指令（临时状态标记的用法）
+② 长期记忆（按作用域过滤）
+③ 短期状态（带剩余时间，排在记忆之前）
+④ 会话摘要（滚动压缩）
+⑤ 最近对话窗口
+⑥ 冲突提示（检测到时才出现）
+⑦ 当前消息
 ```
 
-Two rules in `src/context.ts`:
+`src/context.ts` 里两条规则：
 
-- **Newest wins.** The budget is consumed from the end backwards, so the latest exchange is
-  always present. A window that drops the most recent turn is worse than no window.
-- **A single oversized message is still kept.** The current question must never be squeezed
-  out by its own length or by older chatter.
+- **新的优先**：预算从后往前消耗，所以最近的一轮永远在。丢掉最新一轮的窗口，比没有窗口更糟。
+- **单条超长消息仍然保留**：当前问题绝不能因为它自己太长或被前面闲聊挤掉。
 
-The window is a *view*, not storage: events stay append-only, so compaction can later
-summarise the same rows without losing the originals.
+窗口是**视图**而不是存储：事件始终追加写入，所以压缩可以之后再做而不丢原文。
 
-```
-config.context.turns               6      how many messages
-config.context.budgetChars         4000   hard character cap
-config.context.summary              true   rolling compression on/off
-config.context.summaryTriggerChars 2400   cold bytes that trigger a compression
-config.context.summaryMaxChars     1200   cap for the rendered summary
-```
+### 滚动摘要
 
-Verified by an A/B on a fact that exists only in the previous turn:
-
-```
-turn 1  "我给我的机械键盘换了静音轴，型号是 TTC 冰静"
-turn 2  "那套轴体适合在开放式办公室用吗？"
-        with window    → "冰静本身非常适合开放式办公室…"
-        empty thread   → "如果你告诉我型号，我可以直接给出结论…"
-```
-
-`context_injected` is recorded per task (`{ids, messages, chars}`), so "what did it actually
-see" is answerable after the fact.
-
-### Rolling summary
-
-The window is finite, so conversation eventually falls off the back of it. When the cold part
-of a thread (everything between the summary cursor and the window) exceeds
-`summaryTriggerChars`, it is compressed before the answer is generated:
+窗口有限，对话迟早从后面掉出去。当线程的"冷区"（摘要游标到窗口之间的一切）超过 `summaryTriggerChars`，就在生成答案之前压缩：
 
 ```
 thread_state { thread, summary, summarized_until_event_id }
 ```
 
-- **Structured output**, not prose: 已确认事实 / 用户指令与偏好 / 未决问题 / 关键实体.
-- **Cursor advances only after success.** A failed compression leaves the cursor untouched, so
-  the same events are retried next turn instead of being silently dropped.
-- **The summary is a derived view.** Sources stay in `conversation_events`; a bad compression
-  can be recomputed rather than being permanent loss.
-- **A failed compression never fails the answer** — the run continues with the window alone.
-
-`pi-rt thread <thread>` shows the live state (event count, cursor, summary). Verified with a
-1-message window so the fact could only come from the summary:
-
-```
-turn 1  "项目代号是 Orion-7，负责人是王工。"
-turn 2  "这个项目下周要过安全评审。"      → summary cursor advances, 摘要含 Orion-7 / 王工
-turn 3  "这个项目的代号和负责人分别是什么？"  → "Orion-7，负责人王工。"
-```
-
-### Context and compression, measured
-
-Two suites, same transcript per case, two conditions:
-
-- **baseline** — a fixed 30-message window, no compression (what a plain window gives you)
-- **system** — a 6-message window plus the rolling summary
+- **结构化输出**，不是散文：已确认事实 / 用户指令与偏好 / 未决问题 / 关键实体。
+- **游标只在成功后推进**。压缩失败时游标不动，下一轮重试同一批事件，而不是悄悄丢掉。
+- **摘要是派生视图**，源数据仍在 `conversation_events`，压缩错了可以重算。
+- **压缩失败绝不让回答失败** —— 只用窗口继续。
 
 ```bash
-node src/cli.ts eval-context                            # 10 short cases, 5 filler exchanges
-node src/cli.ts eval-context --cases eval/context-stress.json   # 5 long cases, 20–25 fillers
+pi-rt thread <thread>    # 看实时状态（事件数、游标、摘要）
 ```
+
+### 实测：窗口 vs 窗口+摘要
+
+同一份对话、两种条件（baseline = 固定 30 条窗口；system = 6 条窗口 + 滚动摘要）：
 
 | 场景 | baseline | system | 结论 |
 |---|---|---|---|
-| 短会话（5 轮闲聊） | 10/10 | 10/10 | 窗口够了，摘要没有增量 |
+| 短会话（5 轮闲聊） | 10/10 | 10/10 | 窗口够用，摘要没有增益 |
 | 长会话（20–25 轮闲聊） | **0/5** | **5/5** | 事实被挤出窗口，摘要全部捞回 |
 
-Average summary: 145 chars (short) / 234 chars (long) — far cheaper than carrying the transcript.
+诚实的读法：摘要**不是**普遍改进，它只在窗口装不下时才有价值；在短会话里是纯开销。而且 baseline 不是稻草人 —— 更大的窗口也能过长会话那几题，摘要在**成本有界**上赢，不是"唯一解"。
 
-The honest reading:
+## 上下文编排
 
-- Summarisation is **not** a general improvement; it pays off exactly when the window can no
-  longer hold the thread. On short conversations it is pure overhead.
-- The baseline is not a straw man, but a **bigger window** would also have passed the long
-  cases. Summarisation wins on *bounded cost*, not on being the only possible answer.
-- At 25 turns the whole transcript is still small. The real justification arrives at hundreds
-  of turns, where an unbounded window stops being an option.
+prompt 现在由 `src/compose.ts` 组装：一个纯函数，渲染各段并返回 manifest。P1 阶段是零行为变化的重构 —— 前后 prompt 逐字节对比完全一致（485 字符）。
 
-## Limits: retry, concurrency, budget
-
-Three independent protections, because they fail differently.
-
-### Retry — only for errors that pass on their own
-
-`src/retry.ts` classifies before it retries:
-
-| retryable | not retryable |
-|---|---|
-| 429 / rate limit / 5xx | no API key |
-| timeouts, ECONNRESET, socket hang up | model not found |
-| agent subprocess exiting | 401 / 403 |
-| "temporarily unavailable" | budget exceeded |
-
-Backoff is exponential with full jitter, capped: `min(maxMs, base × 2^(n-1))`, then randomised
-into `[half, full]`. Retrying a configuration error just burns time and money, so the
-classification matters more than the schedule.
-
-The **task row** is the retry unit, not the process: every attempt spawns a fresh
-`pi --mode rpc`, so a hung attempt cannot poison the next one. The user message is recorded
-once, before the loop — a retry must not create a second event (and therefore a second memory).
-
-### Concurrency — a gate, not just a queue
-
-`src/gate.ts` caps `maxConcurrent` **and** spaces starts with `minIntervalMs`. Concurrency
-alone cannot express "at most one start per N ms", which is what a per-minute rate limit
-actually needs.
-
-### Budget — provider-reported, not estimated
-
-pi reports real usage on every `message_update`:
-
-```json
-{ "input": 249, "output": 148, "cacheRead": 5888, "totalTokens": 6285,
-  "cost": { "total": 0.000287628 } }
-```
-
-Two gotchas, both silent if you get them wrong: the total is `totalTokens` (not `total`), and
-`cost` is an **object**. `Number(object)` is `NaN`, and SQLite binds `NaN` as `NULL`, which
-trips `NOT NULL` — the first real run failed exactly this way. `normalizeUsage()` and a
-`safe()` coercion in the store now pin the shape, and `tests/usage.test.mjs` locks it.
-
-- **Daily cap**: checked before the run; blocks in ~450 ms with `budget_exceeded` and without
-  spending a token.
-- **Per-task cap**: checked on every usage update mid-run; the run is aborted, and the partial
-  spend is still recorded, because a failed attempt burned tokens too.
-
-```
-config.limits.maxAttempts     3         total attempts per task
-config.limits.retryBaseMs     2000      backoff base
-config.limits.maxRetryMs      30000     backoff cap
-config.limits.maxConcurrent   1         parallel runs
-config.limits.minIntervalMs   0         spacing between starts
-config.limits.dailyTokens     2000000   0 disables
-config.limits.taskTokens      200000    0 disables
-```
-
-`pi-rt stats` shows today's tokens, cost and run count next to the memory counters.
-
-### Held-out set (10 cases, run once)
-
-`eval/holdout.json` was written **after** the prompt had been tuned, and run exactly once.
-Its score is a baseline, not a target:
-
-```
-9/10 pass · precision 91.7% · recall 100% · 状态迁移 2/2 · 负例泄漏 1/3
-```
-
-The one failure is a genuine gap, not a judge quibble:
-
-| case | what happened |
-|---|---|
-| `h01_secret` | "我的数据库密码是 Passw0rd!2024" was stored as `user_database_password` |
-
-That is the worst place to be wrong: the row is injected into every subsequent prompt in that
-scope, rendered into `MEMORY.md`, and persisted in SQLite. There is **no secret filter** — the
-engine treats a credential exactly like a preference.
-
-Discipline note: this set is now burned for `h01`. A fix must be validated against a **new**
-held-out set, otherwise "we fixed it" is just fitting the test.
-
-### Secret guard
-
-The held-out run found the worst possible failure: a pasted password was stored as a
-preference — and therefore injected into every later prompt, rendered into `MEMORY.md` and
-persisted in SQLite. `src/secrets.ts` now refuses credentials **at the write boundary**
-(`MemoryStore.apply`), not in the prompt.
-
-| blocked | why |
-|---|---|
-| `密码是 <value>` / `password: <value>` | keyword + separator + a value-shaped token |
-| `sk-…`, `ghp_…`, `gho_…`, `xox*-…`, `AKIA…`, `AIza…` | provider token prefixes |
-| `Bearer <token>`, `-----BEGIN … PRIVATE KEY-----` | auth headers, key blocks |
-| 28+ char token with ≥3 character classes | generated-looking strings |
-| 银行卡 / 支付密码 + 6+ digits | card numbers and PINs |
-
-False positives are the other failure mode: "我的密码策略是 90 天改一次" must be stored, and
-a system that blocks it becomes annoying enough to be turned off. So assignment patterns
-require an actual value after the keyword, UUIDs and hex digests are excluded from the
-entropy rule, and `tests/secrets.test.mjs` pins 9 must-block and 7 must-allow shapes.
-
-Enforcement is code, not vibes: the prompt also says "credentials are never remembered", but a
-prompt can be argued with. A blocked write leaves a `memory_blocked` audit event with a
-**redacted** preview, so "the engine tried to remember a password" is visible without storing it.
-
-Held-out validation (`eval/holdout-secrets.json`, run once):
-
-```
-9/10 pass · 值泄漏 0 例 · FP 0 · 证据被拒 1
-```
-
-The single failure is the over-correction: a benign `sha256` digest was **not** recorded.
-That is the real trade-off of this guard — tightening detection also makes the model more
-cautious about technical identifiers. Documented rather than tuned away.
-
-**Known limitation:** the guard covers memory rows, not the raw event log. A message that
-contains a password still sits verbatim in `conversation_events`; redacting at ingest is the
-next step, and it needs its own decision about how much of the original to keep.
-
-### Short state
-
-Long-term memory answers "what is true about this person"; short state answers "what are we in
-the middle of". Ports, branches, pending links and task progress must survive turns without
-becoming permanent beliefs — a different mechanism, not a different category of memory.
-
-| | long-term memory | short state |
-|---|---|---|
-| addressed by | subject + key, injected by scope | key, hit directly |
-| lifetime | permanent, decays by category | explicit TTL (1 min – 30 d) |
-| write | batched, asynchronous | **synchronous** |
-| on conflict | four-way verdict | newest value wins |
-
-The synchronous write is the point: "I remembered it" must be true when it is said, which an
-asynchronous distiller cannot promise.
-
-```bash
-pi-rt state set deploy_port 8080 --ttl 7d
-pi-rt state list                      # shows remaining hours and a promotion hint
-pi-rt state promote deploy_port --category fact   # slot → memory, slot removed
-```
-
-The agent can write slots itself with a control token, parsed on our side rather than through a
-second model turn:
-
-```
-<!--state: debug_port=8899; ttl=7d-->
-```
-
-The token is stripped before the reply is stored or sent, so the user never sees it. Verified:
-the agent emitted it for "把端口 8899 记成临时状态", the slot appeared with 168h remaining, and
-the visible reply was just "已记下调试端口 8899，有效期 7 天。"
-
-Guard: slots are held to the same standard as memory. A credential-shaped **name**
-(`db_password`) or value is refused on write, because the slot is injected into prompts too.
-
-## Context composition
-
-The prompt is now assembled by `src/compose.ts`, a pure function that renders segments and
-returns a manifest. P1 changed no behaviour: the pre- and post-refactor prompts were diffed
-byte-for-byte and were identical (485 chars).
-
-Every run records `context_plan`:
+每次运行都会记 `context_plan`：
 
 ```json
 {"budgetChars":4000,"usedChars":486,"estimatedTokens":139,"charsPerToken":3.5,
- "segments":[{"kind":"instructions","chars":86},{"kind":"memory","chars":290,"meta":{"ids":[31,30,29,5,4,3]}},
+ "segments":[{"kind":"instructions","chars":86},
+             {"kind":"memory","chars":290,"meta":{"ids":[31,30,29,5,4,3]}},
              {"kind":"short_state","chars":165,"meta":{"keys":["hotfix_branch","deploy_port"]}},
              {"kind":"current","chars":17}],"skipped":[]}
 ```
 
-### Budgets, eviction and dedupe (P2)
+### 段的预算、淘汰与去重（P2）
 
-Each segment has a floor and a cap, and the prompt now respects a total budget:
-
-| segment | floor | cap | what gets dropped first |
+| 段 | floor | cap | 先丢什么 |
 |---|---|---|---|
-| instructions | — | — | never |
-| memory | 150 | 900 | lowest-priority lines (trailing) |
-| short state | 0 | 300 | trailing lines |
-| summary | 0 | 1000 | trailing sections |
-| window | **1200** | 2800 | **oldest** lines (newest always kept) |
-| retrieved | 0 | 800 | first to be evicted |
-| current message | — | — | never |
+| 指令 | — | — | 永不 |
+| 长期记忆 | 150 | 900 | 尾部低优先行 |
+| 短期状态 | 0 | 300 | 尾部行 |
+| 摘要 | 0 | 1000 | 尾部段落 |
+| 最近窗口 | **1200** | 2800 | **最旧**的行（新的必留） |
+| 检索 | 0 | 800 | 第一个被淘汰 |
+| 当前消息 | — | — | 永不 |
 
-Eviction order when the budget is tight: `retrieved → short state → memory → summary → window`.
-The window keeps a hard floor, so a long memory cannot push the recent conversation out.
+预算紧张时的淘汰顺序：`检索 → 短期状态 → 记忆 → 摘要 → 窗口`。窗口有硬保底，所以再长的记忆也挤不掉最近的对话。
 
-**Cross-segment dedupe** runs before allocation: a line that already appears in a
-higher-priority segment is dropped from the lower one (`window > short state > memory >
-summary`). Presentation prefixes are stripped first (`- [事实·4] …`, `[Rick] …`) — without that,
-similarity ends up measuring formatting instead of content.
+**跨段去重**在分配之前跑：已经出现在更高优先级段里的行会从低优先段删掉（`窗口 > 短期状态 > 记忆 > 摘要`）。比较前先剥掉展示前缀（`- [事实·4] …`、`[Rick] …`）—— 不剥的话，相似度测的是格式而不是内容。
 
-Live proof from a real run:
+真实运行里的证据：
 
 ```json
 "dedup": [{"kind":"memory","dropped":"runtime 状态存 SQLite 而非 Postgres…",
            "keptIn":"higher-priority segment","similarity":0.73}]
 ```
 
-memory went from 311 to 258 chars, and the prompt stayed identical otherwise.
+记忆段 311 → 258 字符，其余部分一字未变。
 
-The manifest reports per-segment `floor`/`cap`/`truncated`/`droppedChars`, plus
-`evictions[]`, `dedup[]` and `overBudget`. `context_plan` records all of it.
+manifest 记录每段的 `floor`/`cap`/`truncated`/`droppedChars`，以及 `evictions[]`、`dedup[]`、`overBudget`。
 
-Remaining from [docs/context-composition.md](docs/context-composition.md): P3 (conflict
-resolution, token calibration) and P4 (retrieval segment).
+### token 校准
 
-### Token calibration
+用 `chars / 3.5` 估 token 只是猜。provider 会报真实用量，所以比例是**学出来的** —— 但有个会改变结论的细节：
 
-Estimating tokens as `chars / 3.5` is a guess. The provider reports real usage, so the ratio is
-learned instead of assumed — with one subtlety that changes the answer:
-
-**provider `input` is not our prompt.** pi sends its own system prompt and tool schemas, so the
-count includes a fixed overhead. Dividing tokens by characters (no intercept) inflates the
-ratio; the honest model is a line:
+**provider 的 `input` 不是我们的 prompt。** pi 还会发自己的系统提示和工具 schema，所以计数里含一段固定开销。直接相除会虚高；诚实的模型是一条直线：
 
 ```
-provider_input_tokens ≈ slope × our_prompt_chars + intercept
+provider_input_tokens ≈ slope × 我们的prompt字符数 + intercept
 ```
 
-`src/calibration.ts` fits that line with least squares, requires **8 samples** before trusting
-it, and reports `r2` so a bad fit is visible. Below the threshold it falls back to 3.5.
+`src/calibration.ts` 用最小二乘拟合，**满 8 个样本**才启用，并报告 `r2` 让差拟合可见；不足时回落到 3.5。
 
 ```bash
-pi-rt calibrate --backfill   # recover samples from usage.input ⨝ context_plan.usedChars
-pi-rt calibrate              # show slope, intercept, r2, resulting chars/token
+pi-rt calibrate --backfill   # 从 usage.input ⨝ context_plan.usedChars 回填样本
+pi-rt calibrate              # 看斜率、截距、r2、最终比例
 ```
 
-Current fit on this machine:
+本机当前拟合：`slope 0.3259 tokens/char`、`intercept 115 tokens`、`r2 0.692`、`3.07 chars/token`。
 
-```
-samples      8
-slope        0.3259 tokens/char
-intercept    115 tokens      (pi system prompt + tool schemas)
-r2           0.692
-estimate     3.07 chars/token
-```
+两个结论：默认的 3.5 对中文密集内容是**低估约 12%**；`r2 = 0.69` 说明可用但有噪声，所以 manifest 记下实际用了哪个比例，估错了能追溯。
 
-Two things fall out of that:
+### 冲突提示
 
-- The default 3.5 **underestimated** by about 12 % for Chinese-heavy prompts (3.07 chars/token
-  means more tokens per character).
-- `r2 = 0.69` says the fit is usable but noisy — the manifest records the ratio it used
-  (`charsPerToken`) so a bad estimate is traceable rather than invisible.
-
-### Conflict hints
-
-When a memory line disagrees with something just said, the prompt gets a short hint:
+当一条记忆与刚说的话不一致时，prompt 里会多一小段：
 
 ```
 ## 上下文冲突提示
 - 记忆「部署端口是 3000」与最近对话不一致（相似度 0.23），以最近对话为准
 ```
 
-**The read path never writes.** A heuristic that is wrong once would corrupt a fact
-permanently, so the hint only states precedence; the actual rewrite stays in distillation,
-where the four verdicts and the evidence check live. Every run emits `context_conflict`.
+**读路径永远不写。** 启发式错一次就会永久污染一条事实，所以提示只声明优先级；真正的改写留给提炼（四态裁决 + 证据校验）。每次运行都会记 `context_conflict`。
 
-Detecting this needs two signals, because either alone fails:
+检测需要两个信号，缺一不可：
 
-| signal | example | why the other one fails |
+| 信号 | 例子 | 另一个为什么不行 |
 |---|---|---|
-| same topic + disjoint numbers | 端口是 `3000` → 端口改成 `8080` | bigram similarity is **0.23** — far below any usable threshold |
-| wording drift, no numbers | 「必须完全避开」→「偶尔吃一点没事」 | there is no number to compare |
+| 同话题 + 数字不相交 | 端口是 `3000` → 端口改成 `8080` | 词面相似度只有 **0.23**，任何可用阈值都够不到 |
+| 无数字的措辞漂移 | 「必须完全避开」→「偶尔吃一点没事」 | 没有数字可比 |
 
-Similarity is measured by **containment** (`|A∩B| / min(|A|,|B|)`), not Jaccard: Jaccard
-punishes length, scoring the allergen rephrasing at 0.21 while containment scores it 0.42.
-The wording branch also requires that neither line carries a number, so "端口 8080 已确认"
-is not treated as contradicting "端口是 8080".
+相似度用**包含度**（`|A∩B| / min(|A|,|B|)`）而不是 Jaccard：Jaccard 惩罚长度，把过敏那对改写句打到 0.21，包含度是 0.42。措辞分支还要求双方都不含数字，这样"端口 8080 已确认"不会被判成与"端口是 8080"矛盾。
 
-Live check:
+实测：
 
 ```
 记忆: 部署端口是 3000       窗口: 部署端口改成 8080 了。
@@ -632,264 +357,253 @@ Live check:
 → 回答: "当前部署端口是 8080 …… 长期记忆里的 3000 已作废"
 ```
 
-## Event log: what is worth keeping
+## 短期状态
 
-Every RPC record used to be persisted verbatim. That is mostly streaming deltas: pi emits a
-`message_update` per text token and wraps turns in start/end pairs, which are useful live and
-useless afterwards — the finished answer is already stored as a conversation event.
+长期记忆回答"关于这个人什么是真的"，短期状态回答"我们正做到哪一步"。端口、分支、待办链接、任务进度必须跨轮存活，但不该变成永久信念 —— 这是不同的机制，不是记忆的另一个类别。
 
-Measured cost: **19,313 of 19,738 rows (83 % of 7.5 MB)** over ~30 runs.
+| | 长期记忆 | 短期状态 |
+|---|---|---|
+| 寻址方式 | 主体 + key，按作用域注入 | key，直接命中 |
+| 生命周期 | 永久，按类别衰减 | 显式 TTL（1 分钟 – 30 天） |
+| 写入 | 批量、异步 | **同步** |
+| 冲突时 | 四态裁决 | 最新值胜 |
 
-| dropped | kept |
-|---|---|
-| `message_update`, `message_start`, `message_end` | `tool_execution_start` / `_end` (compacted) |
-| `turn_start`, `turn_end`, `agent_start` | `agent_end` (stop reason only) |
-| `tool_execution_update` (incremental tool output) | `error`, `usage`, `context_plan`, `context_conflict`, … |
-
-Two rules keep the remaining rows honest and small:
-
-- **Compaction at write time**: only the fields that carry information survive
-  (`toolName`, `toolCallId`, `isError`, output).
-- **Truncation with a marker**: a payload over 2,000 chars becomes
-  `{truncated: true, originalChars: N, preview: "…"}` — it never silently pretends the record
-  was always small.
-
-Result on this machine:
-
-```
-events   19738 行 / 7531 KB  →  302 行 / 197 KB
-database 10.80 MB            →  0.49 MB      (-95.5 %)
-```
-
-A fresh run now writes **7 rows / 1.1 KB** instead of ~750 rows, and `agent_end` is 51 bytes
-instead of 22 KB.
+同步写入是关键：「已记住」这句话在说出口的瞬间必须为真，异步提炼器保证不了这一点。
 
 ```bash
-pi-rt compact --dry-run    # show what would go
-pi-rt compact --vacuum     # delete noise, truncate oversized payloads, reclaim space
+pi-rt state set deploy_port 8080 --ttl 7d
+pi-rt state list                                   # 剩余时间 + 晋升提示
+pi-rt state promote deploy_port --category fact    # 槽位 → 长期记忆，槽位移除
 ```
 
-## Sandbox: what is actually enforced
+agent 也能自己写，用控制标记，由服务端解析而不是再跑一次模型：
 
-Three layers, all of them enforced outside the prompt, because an instruction the model can
-ignore is not a boundary.
+```
+<!--state: debug_port=8899; ttl=7d-->
+```
 
-| mode | shell (`bash`) | write / edit | use |
+标记会在存储和发送之前剥掉，用户永远看不到。实测：让它"把端口 8899 记成临时状态"，槽位出现且剩 168 小时，可见回复只有"已记下调试端口 8899，有效期 7 天。"
+
+守卫：槽位与记忆同级 —— 名字像凭据（`db_password`）或值像凭据一律拒写，因为槽位同样会进 prompt。
+
+## 凭据守卫
+
+留出集跑出了最糟的一种失败：贴进来的密码被当成偏好存了下来 —— 于是被注入到之后每一轮 prompt、渲染进 `MEMORY.md`、持久化在 SQLite 里。`src/secrets.ts` 现在在**写入边界**（`MemoryStore.apply`）拒绝凭据，而不是靠提示词。
+
+| 拦什么 | 依据 |
+|---|---|
+| `密码是 <值>` / `password: <值>` | 关键字 + 分隔符 + 值形状的 token |
+| `sk-…`、`ghp_…`、`gho_…`、`xox*-…`、`AKIA…`、`AIza…` | 供应商 token 前缀 |
+| `Bearer <token>`、`-----BEGIN … PRIVATE KEY-----` | 认证头、私钥块 |
+| 28+ 字符且 ≥3 类字符 | 生成串 |
+| 银行卡 / 支付密码 + 6 位以上数字 | 卡号与 PIN |
+
+另一个失败方向是误报：「我的密码策略是 90 天改一次」必须能存，一个把它也拦掉的系统会被用户关掉。所以赋值规则要求关键字后面**真的有值**，UUID 和 hex 摘要从熵规则里排除，`tests/secrets.test.mjs` 锁了 9 个必须拦、7 个必须放。
+
+约束是代码，不是感觉：提示词里也写了"凭据一律不记"，但提示词可以被模型说服。被拦的写入会留一条 `memory_blocked` 审计事件，内容是**脱敏预览**。
+
+## 事件日志：什么值得留
+
+每一条 RPC record 过去都原样入库，其中大部分是流式增量：pi 每个 token 发一条 `message_update`，用 start/end 包住每一轮 —— 活着时有用，事后无用，因为最终答案已经作为对话事件存在了。
+
+实测成本：**19,738 行里的 19,313 行（7.5 MB 中的 83%）**，约 30 次运行。
+
+| 丢掉 | 保留 |
+|---|---|
+| `message_update`、`message_start`、`message_end` | `tool_execution_start` / `_end`（压缩字段） |
+| `turn_start`、`turn_end`、`agent_start` | `agent_end`（只留停止原因） |
+| `tool_execution_update`（工具增量输出） | `error`、`usage`、`context_plan`、`context_conflict` … |
+
+两条规则让剩下的行既诚实又小：
+
+- **写入时压缩**：只留有信息量的字段（`toolName`、`toolCallId`、`isError`、输出）。
+- **截断要留标记**：超过 2,000 字符的 payload 变成 `{truncated: true, originalChars: N, preview: "…"}` —— 绝不假装它本来就这么小。
+
+本机结果：`19,738 行 / 7,531 KB → 302 行 / 197 KB`，数据库 `10.80 MB → 0.49 MB（-95.5%）`。现在一次运行只写 **7 行 / 1.1 KB**，`agent_end` 从 22 KB 降到 51 字节。
+
+```bash
+pi-rt compact --dry-run    # 先看会删什么
+pi-rt compact --vacuum     # 删噪音、截断超长行、回收磁盘
+```
+
+## 沙箱：真正被强制执行的部分
+
+三层，全部在提示词之外执行 —— 模型能忽略的指令不是边界。
+
+| 模式 | shell（`bash`） | write / edit | 用途 |
 |---|---|---|---|
-| `readonly` | ❌ | ❌ | answering questions about code |
-| `safe` (default) | ❌ | ✅ | everyday assistant work |
-| `full` | ✅ | ✅ | tasks that must run commands |
+| `readonly` | ❌ | ❌ | 回答关于代码的问题 |
+| `safe`（默认） | ❌ | ✅ | 日常助理工作 |
+| `full` | ✅ | ✅ | 必须执行命令的任务 |
 
-`--exclude-tools` is passed to pi itself, so the tool is not *degraded* — it is absent.
+`--exclude-tools` 是交给 pi 本身的，所以工具不是被"降级"，而是**不存在**。
 
-**Environment scrubbing.** The child no longer inherits `process.env`. It gets an OS whitelist
-(`PATH`, `SystemRoot`, `TEMP`, …) plus a handful of control variables. pi reads its model
-credentials from its own config directory, so nothing needed is lost — and a shell can no
-longer `echo $FEISHU_APP_SECRET`.
+**环境变量收窄**：子进程不再继承 `process.env`，只拿 OS 白名单（`PATH`、`SystemRoot`、`TEMP`…）加几个控制变量。pi 从自己的配置目录读模型凭证，所以功能没有损失 —— 而 shell 再也 `echo` 不到 `$FEISHU_APP_SECRET`。
 
-**Workspace guard.** `pi-rt sandbox` refuses to run in a drive root, the home directory, or any
-path shallower than two segments. Running the agent at `C:\` means every absolute path it
-invents is in scope.
+**工作区护栏**：拒绝磁盘根目录、用户主目录、以及系统目录（`/etc`、`/usr`、`/var`、`C:\Windows` …）。在 `C:\` 下运行 agent 意味着它随手想到的绝对路径都在射程内。
 
-Verified live, not assumed:
+实测（不是"应该"）：
 
 ```
 readonly  → "本次会话我只挂载了 read 工具，没有写文件或执行命令的能力"
-            sandbox-probe.txt was NOT created
+            sandbox-probe.txt 确实没被创建
 safe      → "当前会话只挂载了 read / edit / write 三个文件工具，没有 shell 执行工具"
-full      → parent exported PI_RT_TEST_SECRET=TOPSECRET-123;
-            inside the child the variable is UNSET
+full      → 父进程 export PI_RT_TEST_SECRET=TOPSECRET-123
+            子进程里该变量 UNSET
 ```
 
-### What this is not
+### 这不是什么
 
-This machine has no Docker, no WSL, and Windows 11 Home has no Windows Sandbox, so there is **no
-OS-level isolation** here. The honest boundary:
+`read` 工具仍然能读你有权读的任何文件 —— 包括 pi 自己的凭据文件，所以处理不可信任务时只有 `readonly` 勉强算安全。没有网络出口限制，`full` 模式下环境变量收窄是 shell 与密钥之间的唯一屏障。
 
-- the `read` tool can still read any file the user can read — including pi's own credential
-  file, which is why `readonly` is the only mode worth using on an untrusted task;
-- there is no network restriction;
-- `full` mode is unconstrained by design, and the env scrub is the only thing standing between a
-  shell and a secret.
+真正的隔离需要容器或虚机。这里实现的是**能力限制**，以极低成本移除最锋利的边缘（`rm -rf`、`git push --force`、任意进程）。
 
-Real isolation needs a container or a VM. What is implemented here is *capability limiting*,
-which removes the sharpest edges (`rm -rf`, `git push --force`, arbitrary processes) at low cost.
+## 归档与备份
 
-## Long-term upkeep: archive and backup
+两个不同的问题，两套机制。
 
-Two different problems, two different mechanisms.
+**归档**把旧的对话事件搬出主表到 `data/archive/*.jsonl.gz` 再删除。三条排除规则，各有理由：
 
-**Archive** moves old conversation events out of the live table into `data/archive/*.jsonl.gz`
-and then deletes them. Three exclusions, each for a reason:
-
-| kept | why |
+| 保留 | 为什么 |
 |---|---|
-| not distilled yet | still pending work — archiving it loses the memory |
-| cited by a memory's `evidence_event_id` | deleting it would leave the evidence chain dangling |
-| recent | still inside the context window |
+| 还没提炼的 | 仍是待办工作，归档等于丢记忆 |
+| 被某条记忆引用为 `evidence_event_id` 的 | 删了证据链就断了 |
+| 最近的 | 还在上下文窗口里 |
 
-The archive stores the original rows verbatim, so "we deleted it" is reversible.
+归档文件保存原始行，所以"删了"是可逆的。
 
-**Backup** is a compressed snapshot via `VACUUM INTO` — not a file copy, because the database
-runs in WAL mode and a copy can capture a torn state. `serve` takes one automatically when the
-newest backup is older than 24 hours.
+**备份**用 `VACUUM INTO` 生成一致性快照再压缩 —— 不是拷文件，因为库跑在 WAL 模式，复制可能拿到撕裂状态。`serve` 会在最新备份超过 24 小时时自动做一次。
 
 ```bash
-pi-rt archive --days 30 --dry-run   # what would be moved
-pi-rt archive --days 30             # move it
-pi-rt archive --list                # archive + backup inventory, newest backup age
-pi-rt backup --keep 7               # snapshot now, keep the newest 7
+pi-rt archive --days 30 --dry-run
+pi-rt archive --days 30
+pi-rt archive --list
+pi-rt backup --keep 7
 ```
 
-Measured on this machine: database 0.49 MB → backup **86.5 KB**; with `--days 0` the archive
-would take 77 events while 11 stayed behind as evidence.
+本机实测：库 0.49 MB → 备份 **86.5 KB**；`--days 0` 时 77 条可归档、11 条因证据保留。
 
-## Running as a server
+## 作为服务运行
 
-`pi-rt serve` answers messages as they arrive and runs a maintenance tick in the background.
+`pi-rt serve` 收到消息就回答，并在后台跑维护循环。
 
-The gap it closes: distillation normally fires **after N turns** (default 10), so a conversation
-of two or three messages never reaches the threshold and its memory is never extracted — the
-user said something worth remembering and it was silently dropped. A real IM conversation is
-mostly short ones.
+它补的缺口是：提炼默认在**第 N 轮**（10）之后触发，所以两三句的对话永远够不到阈值、记忆永远不被抽取 —— 用户说了值得记的东西，然后被悄悄丢掉。而真实的 IM 对话大多是短的。
 
 ```
-every PI_RT_MAINTENANCE_MINUTES (default 5):
-  prune expired short-state slots
-  for each thread idle for PI_RT_IDLE_MINUTES (default 15):
-    distil it, unless a reply for that thread is in flight
+每 PI_RT_MAINTENANCE_MINUTES（默认 5）：
+  清理过期的短期状态槽位
+  对每个闲置超过 PI_RT_IDLE_MINUTES（默认 15）的线程：
+    提炼，除非该线程正在回复
 ```
 
-Two guards that matter:
+两个必要的守卫：
 
-- **Never distil a thread mid-reply.** `src/maintenance.ts` takes a `busy` set that the message
-  handler holds while a task runs; without it the extractor can see a half-written turn.
-- **One failure must not abort the tick.** A thread whose distillation throws is recorded and
-  skipped, so one bad conversation cannot block every other.
+- **绝不在回复中途提炼**：`src/maintenance.ts` 接收一个 `busy` 集合，消息处理器在任务运行期间持有它；没有它，抽取器会看到半截对话。
+- **单个失败不能中断整轮**：某个线程提炼抛错就记录并跳过，一个坏对话不能卡住其他所有。
 
-`pi-rt serve --no-maintenance` disables the loop (useful when a separate `pi-rt worker` owns
-distillation).
+`serve --no-maintenance` 可关闭该循环（当另一个 `pi-rt worker` 负责提炼时）。
 
-Verified end-to-end: two webhook messages (below the 10-turn threshold) in a fresh thread were
-extracted by the next tick, producing `trip_budget_cny` without any manual command.
+端到端验证过：两条 webhook 消息（低于 10 轮阈值）在下一个 tick 被提炼出 `trip_budget_cny`，没有执行任何手工命令。
 
-## Evaluating memory
+### 部署到云上
 
-Three sets, deliberately kept separate:
+`deploy/` 里有完整产物：Dockerfile、compose、systemd unit、bootstrap 脚本。详见 [deploy/README.md](deploy/README.md)。
 
-| set | purpose | status |
+要点：飞书长连接是**纯出站**的，所以不需要公网 IP、域名、证书和 ICP 备案；单实例设计（SQLite + 一条长连接）不能水平扩容。
+
+## 评测
+
+三套，刻意分开：
+
+| 集合 | 用途 | 状态 |
 |---|---|---|
-| `eval/cases.json` (28) | development benchmark, tuned against | in-sample, must not be quoted |
-| `eval/holdout.json` (10) | first held-out run | burned by `h01` (credential leak) |
-| `eval/holdout-secrets.json` (10) | validates the credential guard | burned by assertion fixes |
-| `eval/holdout-v3.json` (30) | **current benchmark of record** | run once, 3 repetitions |
+| `eval/cases.json`（28） | 开发基准，调参用过 | 样本内，不可引用 |
+| `eval/holdout.json`（10） | 第一次留出 | 因 `h01` 报销（凭据泄漏） |
+| `eval/holdout-secrets.json`（10） | 验证凭据守卫 | 因断言修正报销 |
+| `eval/holdout-v3.json`（30） | **当前基准** | 跑一次，3 次重复 |
 
-A single pass reports a number; it does not tell you whether that number is stable. `--repeat`
-runs the whole suite again and reports mean / min / max / range, which is the difference between
-"9 out of 10" and "87 % ± 10 points".
+单次只给一个数字，不告诉你它稳不稳。`--repeat` 会把整套再跑一遍并报告均值 / 最小 / 最大 / range —— 这就是"10 题对 9 题"和"87% ± 10 个点"的区别。
 
 ```bash
 pi-rt eval --cases eval/holdout-v3.json --repeat 3
 ```
 
-The discipline that makes the number mean anything: the set was written **before** the run, and
-nothing is tuned afterwards. When a case fails, the failure is reported as a finding, not fixed
-in the same breath — otherwise the benchmark becomes a description of the fix.
+让数字有意义的纪律：**题先写好，跑完不改**。用例失败就作为发现报告，而不是顺手修掉 —— 否则基准就变成"这次改动"的描述。
 
-### Result: 30 cases × 3 runs
+### 结果：30 题 × 3 次
 
-| metric | mean | min | max | range |
+| 指标 | 均值 | 最小 | 最大 | 区间 |
 |---|---|---|---|---|
-| pass rate | **87.8 %** | 83.3 % | 93.3 % | 10.0 pt |
-| precision | 85.0 % | 80.0 % | 88.0 % | 8.0 pt |
-| recall | 93.9 % | 90.9 % | 100.0 % | 9.1 pt |
-| credential leaks | **0** | 0 | 0 | 0 |
+| 通过率 | **87.8%** | 83.3% | 93.3% | 10.0 pt |
+| precision | 85.0% | 80.0% | 88.0% | 8.0 pt |
+| recall | 93.9% | 90.9% | 100.0% | 9.1 pt |
+| 凭据泄漏 | **0** | 0 | 0 | 0 |
 
-Two failures are **systematic** (wrong in all three runs) and both point at the same idea —
-an assertion's *source* is not constrained:
+两次失败是**系统性**的（三次都错）：
 
-- `v25_paraphrase` — the only factual sentence was the assistant paraphrasing; the extractor
-  learned it. Validation checks that the quote is in the cited event, not that the event is a
-  **user** message.
-- `v20_invalidate` — the action was recognised (`invalidate:morning_run`) but the state never
-  flipped, because the model omitted `target_fact_id` and nothing bound the action to a row.
+- `v25_paraphrase` —— 唯一的事实句是助手在复述，抽取器把它学了。校验只检查引文在所引事件里，不检查该事件是**用户**消息。
+- `v20_invalidate` —— 动作识别对了，但状态没翻转。
 
-Four others flip between runs, which is the whole argument for `--repeat`: a single pass here
-would have reported anywhere from 83 % to 93 %.
+还有四条在运行之间摇摆，这正是 `--repeat` 的全部理由：单次在这里可能报 83% 也可能报 93%。
 
-Full write-up: [eval/holdout-v3-results.md](eval/holdout-v3-results.md).
+**同日更正：** `v20` 不是系统缺陷 —— 我的断言写了 `must_be: "invalidated"`，而校验器不支持这个值，于是落进默认分支（要求恰好一条活跃行），作废后活跃行为 0 就判失败。作废本身是成功的。由此做了两件事：`checkState` 遇到未知 `must_be` 直接抛错，用例改成 `old_inactive`。
 
-**Correction, same day.** `v20_invalidate` was not a system defect: my assertion used
-`must_be: "invalidated"`, which the checker does not support, so it fell through to a plain
-content check and failed on an empty active set. The invalidation had worked. Two changes came
-out of that: `checkState` now throws on an unknown `must_be` instead of silently mis-judging,
-and the case was corrected to `old_inactive`.
+真正的缺陷只有 `v25`，已修复：**证据必须来自用户消息**。在新一组 8 题（4 条仅助手发言 + 4 条用户亲述对照）上验收：**8/8**，四条助手断言全部被拒、四条对照全部学到。
 
-The real defect was `v25`, and it is fixed: **evidence must come from a user message**. An
-assistant's own paraphrase, guess or invention is not a source. Re-validated on a fresh 8-case
-set (`eval/holdout-v4.json`: 4 assistant-only claims, 4 user-stated controls): **8/8**, with all
-four assistant-only claims rejected and all four controls learned.
+### 关于"100%"的诚实说明
 
-Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.
+开发集在 `deepseek-flash` 上曾连续跑出 28/28。但同样的 28 题连续多轮会产生 27/28、26/28、28/28 —— 而几乎每次"失败"查下去都是**判分问题**：断言了模型合理不认同的类别（`主要用 Go` 是偏好还是事实）、在纠正事件已经让旧事实失效时硬要 `invalidate`、或者在主体已验证的情况下还要求内容里出现人名。由此固化了三条判分规则：
 
-```bash
-node src/cli.ts eval            # writes eval/latest.json + eval/report-<ts>.md
-node src/cli.ts eval --only c08 # one case
-node src/cli.ts eval --keep     # keep per-case temp databases
-```
+- **类别是软指标**，只报一致率，不作为通过门槛 —— 它是最不稳定的字段。
+- **失效看状态**：「被撤回的那句话不再活跃」，而不是「槽位为空」。
+- **`allow_contains`** 容忍用例没有枚举的合理额外事实。
 
-| metric | v2 baseline (20) | v3 (26) | v3 + channels (28) |
-|---|---|---|---|
-| precision | 78.9% | 100% | **100%** (27/27) |
-| recall | 88.2% | 100% | **100%** (27/27) |
-| F1 | 83.3% | 100% | **100%** |
-| 负例泄漏 | 0/6 | 0/7 | **0/7** |
-| 状态迁移正确 | 5/6 | 8/8 | **8/8** |
-| 类别一致率（软指标） | — | — | **100%** (16/16) |
-| 用例通过 | 16/20 | 26/26 | **28/28** |
+所以 100% 只说明"系统拟合了这份基准"，不说明"基准很难"。这 28 题被六轮提示词与判分调优用过，只有留出集才能让数字可引用。
 
-The v3+ cases exercise the new layers specifically: cross-speaker attribution (`c21`), group-scoped commitments (`c22`), unresolvable conflict → `contest` (`c23`), assistant-only claims must not become user memory (`c24`), explicit `correct` with `target_fact_id` (`c25`), two subjects in one sentence (`c26`), a three-person group (`c27`), and quoting a third party (`c28`).
+整个过程中暴露的问题，按顺序：
 
-**The most useful finding was about the benchmark, not the system.** Consecutive runs of the same 28 cases produced 27/28, then 26/28, then 28/28 twice — and nearly every "failure" turned out to be a judge decision: asserting a category the model legitimately disagreed with (`主要用 Go` as preference vs fact), demanding `invalidate` when a corrective event deactivated the old fact just as well, or requiring a person's name inside content whose target was already verified. Consequences baked in:
+1. **JSON 被截断**丢掉整批 → 解析器在断点前抢救完整对象。
+2. **`invalidate` vs `correct`** —— "已停止"留下幽灵活跃记忆 → 提示词里把边界写清。
+3. **真值太窄** —— 合理的额外事实被记成误报 → 用例可以声明 `allow_contains`。
+4. **失效判分太严** —— 纠正事件（"猫死了"）和 `invalidate` 一样能让旧事实失效 → 状态检查改为断言"被撤回的话不再活跃"。
+5. **类别当门槛是最吵的判据** → 降级为软指标。
 
-- **Category is a soft metric**, reported as agreement, never a pass/fail gate — it is a judgement call and the least stable field.
-- **Deactivation is judged by state**: "the retracted phrase is no longer active", not "the slot is empty".
-- **`allow_contains`** tolerates legitimate extras the case did not enumerate.
+只有第 1、2 条是系统缺陷，3–5 是**测量缺陷**。这个比例才是真正的教训：一个反复失败的评测，多半在告诉你它的判据有问题。
 
-So the 100% says the system fits this benchmark. It does not say the benchmark is hard. These 28 cases have been used across six iterations of prompt and judge tuning, so a held-out set run once on the next version is the only way to make the number quotable.
+## 设计决策
 
-What the whole sequence exposed, in order:
+- **用 RPC 而不是 SDK。** SDK 把 pi 嵌进进程（更快，但一次崩溃就带走队列，且 agent 与我们共享内存）。RPC 保持硬进程边界，且与语言无关 —— IM 网关或容器化 runner 需要的正是这条接缝。
+- **手写 JSONL 分帧。** pi 的协议是一行一个 JSON 对象。`readline` 在这里是错的：它还会按 `U+2028`/`U+2029` 切，而这两个字符在 JSON 字符串里是合法的。
+- **等 `agent_settled`，不等 `agent_end`。** `agent_end` 只结束一次底层运行；重试、压缩、排队工作还可能继续。只有 `agent_settled` 意味着"它不会自己再动了"。
+- **用自己的数据库，不用 pi 的 session。** 运行时用 `--no-session` 跑 pi。持久化归编排层，这样加 retry、resume、审计、多渠道投递都不用读 pi 的内部格式。
+- **隔离配置目录。** `PI_CODING_AGENT_DIR=data/pi` 把运行时的凭证和设置与用户的全局 `~/.pi/agent` 分开。
+- **`--no-approve`。** 守护进程没法回答信任确认，所以默认拒绝项目本地资源。
 
-1. **Truncated JSON** lost a whole batch → the parser salvages complete objects before the cut.
-2. **`invalidate` vs `correct`** — an "已停止" row left a ghost active memory → the prompt now draws the boundary explicitly.
-3. **Ground truth was too narrow** — legitimate extras (job, name, knee injury) scored as false positives → cases declare `allow_contains`.
-4. **Judge too strict on deactivation** — a corrective event ("the cat died") deactivates the old fact just as well as `invalidate` does → state check asserts *the retracted phrase is no longer active*, not *the slot is empty*.
-5. **Category as a gate was the noisiest criterion** — `主要用 Go` as preference vs fact, an event vs a preference for a weekly review → category became a soft metric.
+## 状态
 
-Only items 1 and 2 were system defects; 3–5 were defects in the measurement. That ratio is the real lesson: an eval that keeps failing is usually telling you about its own criteria.
+**已完成并验证：**
 
-## Design decisions
+- 队列 → 派生 → 流式/错误 → 持久化 → 僵尸任务回收
+- 记忆 v3：编号事件、逐事件证据绑定、结构化主体、四态裁决、争议行不注入、批量提炼、完整审计链
+- 凭据守卫：写入边界拦截，值泄漏 0；`memory_blocked` 审计事件
+- 短期状态：TTL、同步写、晋升、agent 自写、过期清理
+- 上下文：窗口 + 滚动摘要；编排（段预算 / 淘汰顺序 / 跨段去重 / 冲突提示 / token 校准 / manifest）
+- 可靠性：按错误分类的重试、并发门、双层预算（provider 真实用量）
+- 运维：事件表瘦身、可逆归档、一致性备份、每日快照
+- 安全：工具能力限制、环境变量收窄、工作区护栏
+- 通道：本地 `feed`、Telegram 长轮询、飞书长连接与 webhook、传输层幂等
+- 服务化：`serve` 后台维护循环（闲置提炼 + 过期清理 +每日备份）
+- 部署：已在一台 Debian 13 云服务器上以容器方式跑起来（飞书长连接已建立）
 
-- **RPC, not SDK.** The SDK embeds pi in-process (fast, but one crash kills the queue and the agent shares our memory). RPC keeps a hard process boundary and is language-agnostic — the same seam an IM gateway or a containerized runner would need. `stdio: inherit` is used for interactive login only.
-- **JSONL framing by hand.** pi's protocol is one JSON object per LF. `readline` is wrong here: it also splits on `U+2028`/`U+2029`, which are legal inside JSON strings.
-- **Wait for `agent_settled`, not `agent_end`.** `agent_end` closes one low-level run; retries, compaction and queued work can still follow. Only `agent_settled` means "it will not continue on its own".
-- **Our database, not pi's sessions.** The runtime runs pi with `--no-session`. Durability belongs to the orchestrator, so we can add retries, resume, audits and multi-channel delivery without reading pi's internal format. (Once task replay needs full transcripts, switch to storing pi session files and re-attach them.)
-- **Isolated config dir.** `PI_CODING_AGENT_DIR=data/pi` keeps the runtime's credentials and settings away from the user's global `~/.pi/agent`.
-- **`--no-approve`.** A daemon cannot answer a trust prompt, so project resources are declined by default. Sandboxing and approval are separate concerns; see the roadmap.
+**已知缺口：**
 
-## Status
+- `src/confidence.ts` 的置信度评分**写好了但没接进 `apply()`** —— 现在所有写入仍是 active，`tentative` 状态从未产生
+- 单条用例在不同运行间抖动（30 题里约 4 条），尚未定位
+- 事件层未脱敏：含密码的原始消息仍明文存在 `conversation_events`
+- 富媒体（图片 / 文件 / 语音）直接丢弃
+- 群聊 @ 触发未验证（飞书权限需管理员审核）
+- 单实例：SQLite + 一条长连接，不能水平扩容
+- 真隔离未做：需要容器/虚机，且 `read` 工具仍能读用户可读的一切
+- 无 CI、无 LICENSE
 
-Working:
-
-- queue → spawn → stream/error → persist → stale-task reaping
-- `doctor` handshake with a real session id
-- **memory v3**: numbered events, per-event evidence binding, structured targets (`current_speaker` / `named_member` / `current_group` / `self`), four verdicts (`create` / `correct` / `invalidate` / `contest`), contested rows excluded from injection, batched distillation (threshold + idle), full audit chain
-- **owner**: `Rick`, configured via `config.json`, canonical subject for the owner's memories
-- **channels**: local `feed` (simulated speakers), Telegram long polling, Feishu long connection, identity table
-- benchmark: 28 cases, two consecutive 28/28 runs on `deepseek-flash` — in-sample, see the caveat above
-
-Verified end to end on a simulated three-person group: three speakers → three identities → each memory bound to `member:张三` / `member:李四` / `member:王五` with the right evidence event id and verbatim quote.
-
-Known gaps: no retry/backoff on task failure, single-threaded worker, no archival for the event/observability tables, Telegram path untested against the live API (no token yet), **Feishu path untested against the live API (no app credentials)**, no held-out benchmark, and the `correct` vs `invalidate` verdict is still unstable for "the habit stopped entirely" (observed both behaviours across runs).
-
-Next phases: see [ROADMAP.md](ROADMAP.md).
+下一步见 [ROADMAP.md](ROADMAP.md)。
