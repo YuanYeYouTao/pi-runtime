@@ -16,6 +16,7 @@ import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPL
 import { NOISE_TYPES } from "./event-log.ts";
 import { runMaintenance } from "./maintenance.ts";
 import { archiveConversationEvents, backupDatabase, inspectArchives, newestBackupAgeHours } from "./archive.ts";
+import { normalizeMode, sandboxReport } from "./sandbox.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -54,6 +55,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts compact [--dry-run] [--vacuum]    清理事件表里的流式增量
   node src/cli.ts archive [--days 30] [--dry-run] [--list]   归档旧事件为 JSONL.gz
   node src/cli.ts backup [--keep 7]               压缩快照数据库
+  node src/cli.ts sandbox [--mode readonly|safe|full]  工具能力策略
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -151,6 +153,12 @@ async function cmdLogin(): Promise<number> {
 }
 
 async function cmdAsk(args: string[]): Promise<number> {
+  const sandboxFlag = args.indexOf("--sandbox");
+  if (sandboxFlag !== -1) {
+    const mode = normalizeMode(args[sandboxFlag + 1]);
+    args.splice(sandboxFlag, 2);
+    process.env.PI_RT_SANDBOX = mode;
+  }
   const cwdFlag = flagValue(args, "--cwd");
   const thread = flagValue(args, "--thread") ?? "default";
   const extract = args.includes("--extract");
@@ -330,6 +338,19 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdSandbox(args: string[]): number {
+  const cfg = loadConfig();
+  const mode = normalizeMode(flagValue(args, "--mode") ?? cfg.sandbox);
+  const report = sandboxReport(mode, cfg.workspace);
+  console.log(`mode        ${report.mode}`);
+  console.log(`policy      ${report.description}`);
+  console.log(`excluded    ${report.excluded.length ? report.excluded.join(", ") : "(none)"}`);
+  console.log(`workspace   ${report.workspace}`);
+  console.log(`workspace   ${report.workspaceOk ? "ok" : `拒绝：${report.workspaceReason}`}`);
+  console.log(`env         ${Object.keys(piEnv(cfg)).length} 个变量（白名单，不含任何密钥）`);
+  return report.workspaceOk ? 0 : 1;
 }
 
 function cmdArchive(args: string[]): number {
@@ -1001,6 +1022,8 @@ async function main(): Promise<number> {
       return cmdCompact(rest);
     case "archive":
       return cmdArchive(rest);
+    case "sandbox":
+      return cmdSandbox(rest);
     case "backup":
       return cmdBackup(rest);
     case "resolve":

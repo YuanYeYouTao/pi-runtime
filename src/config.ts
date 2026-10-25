@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { DEFAULT_MODE, normalizeMode, scrubEnv, toolArgs } from "./sandbox.ts";
+import type { SandboxMode } from "./sandbox.ts";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,6 +63,8 @@ export type RuntimeConfig = {
   idleMinutes: number;
   /** How many compressed database snapshots to keep. */
   backupKeep: number;
+  /** Tool capability policy for the pi subprocess. */
+  sandbox: SandboxMode;
   /** Archive conversation events older than this. */
   archiveDays: number;
   /** Set false to disable automatic distillation (manual `distill` only). */
@@ -101,6 +105,7 @@ export function loadConfig(): RuntimeConfig {
     batchTurns: Number(process.env.PI_RT_BATCH_TURNS ?? raw.memory?.batchTurns ?? 10),
     idleMinutes: Number(process.env.PI_RT_IDLE_MINUTES ?? raw.memory?.idleMinutes ?? 15),
     backupKeep: Number(process.env.PI_RT_BACKUP_KEEP ?? raw.limits?.backupKeep ?? 7),
+    sandbox: normalizeMode(process.env.PI_RT_SANDBOX ?? raw.sandbox?.mode ?? DEFAULT_MODE),
     archiveDays: Number(process.env.PI_RT_ARCHIVE_DAYS ?? raw.limits?.archiveDays ?? 30),
     autoExtract: (process.env.PI_RT_AUTO_EXTRACT ?? String(raw.memory?.autoExtract ?? true)) !== "false",
     feishu: {
@@ -126,15 +131,22 @@ export function loadConfig(): RuntimeConfig {
   };
 }
 
-/** Environment handed to every pi subprocess. */
-export function piEnv(cfg: RuntimeConfig): Record<string, string | undefined> {
-  return {
+/**
+ * Environment handed to every pi subprocess.
+ *
+ * Built from an OS whitelist rather than `process.env`: the child gets a shell in `full` mode,
+ * and inheriting the parent environment would let one `echo $FEISHU_APP_SECRET` exfiltrate a
+ * credential. pi reads its own model credentials from its config directory, so nothing needed
+ * is lost by dropping the rest.
+ */
+export function piEnv(cfg: RuntimeConfig, base: Record<string, string | undefined> = process.env): Record<string, string> {
+  return scrubEnv(base, {
     PI_CODING_AGENT_DIR: PI_CONFIG_DIR,
     PI_SKIP_VERSION_CHECK: "1",
     PI_TELEMETRY: "0",
     PI_RT_PROVIDER: cfg.provider,
     PI_RT_MODEL: cfg.model,
-  };
+  });
 }
 
 /** CLI flags for the pi subprocess. */
@@ -142,5 +154,7 @@ export function piArgs(cfg: RuntimeConfig): string[] {
   const args = ["--no-session", "--no-approve"];
   if (cfg.provider) args.push("--provider", cfg.provider);
   if (cfg.model) args.push("--model", cfg.model);
+  // Enforced by pi, not requested in the prompt.
+  args.push(...toolArgs(cfg.sandbox));
   return args;
 }

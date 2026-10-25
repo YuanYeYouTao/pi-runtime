@@ -46,7 +46,9 @@ export class PiRpc extends EventEmitter {
   start(): void {
     this.child = spawn(process.execPath, [this.opts.cliPath, "--mode", "rpc", ...this.opts.args], {
       cwd: this.opts.cwd,
-      env: { ...process.env, ...this.opts.env } as NodeJS.ProcessEnv,
+      // The caller builds the whole environment (see `piEnv`); inheriting `process.env` here
+      // would undo the scrubbing that keeps credentials out of reach of a shell tool.
+      env: { ...this.opts.env } as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
 

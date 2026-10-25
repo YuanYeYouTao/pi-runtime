@@ -155,6 +155,18 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 - [x] `pi-rt archive --list` 显示归档/备份清单与最新备份年龄
 - [x] 实测：库 0.49 MB → 备份 86.5 KB；`--days 0` 时 77 条可归档、11 条因证据保留
 
+## Phase 3.1 — 沙箱（能力限制层）✅
+
+- [x] 三档模式：`readonly` / `safe`（默认）/ `full`，由 `--exclude-tools` 交给 pi 执行
+- [x] 环境变量收窄：子进程只拿 OS 白名单 + 控制变量，不再继承 `process.env`
+- [x] 工作区护栏：拒绝磁盘根目录 / 用户主目录 / 少于两层的路径
+- [x] `pi-rt sandbox [--mode ...]` 报告当前策略；`ask --sandbox <mode>` 单次覆盖
+- [x] 实测：readonly 下写文件确实失败且文件未创建；safe 下无 shell；full 下父进程的假密钥在子进程里 UNSET
+- [ ] 真隔离（Docker / WSL / 独立用户）：本机三者皆无，Windows 11 家庭版不支持 Windows Sandbox
+- [ ] 网络出口限制（需要容器或代理层）
+
+> 明确边界：read 工具仍能读取用户可读的任何文件（包括 pi 自己的凭据文件），`readonly` 是唯一适合处理不可信任务的模式。
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）

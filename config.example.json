@@ -15,6 +15,7 @@
     "summaryTriggerChars": 2400,
     "summaryMaxChars": 1200
   },
+  "sandbox": { "mode": "safe" },
   "limits": {
     "maxAttempts": 3,
     "retryBaseMs": 2000,

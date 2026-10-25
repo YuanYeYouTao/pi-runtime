@@ -669,6 +669,52 @@ pi-rt compact --dry-run    # show what would go
 pi-rt compact --vacuum     # delete noise, truncate oversized payloads, reclaim space
 ```
 
+## Sandbox: what is actually enforced
+
+Three layers, all of them enforced outside the prompt, because an instruction the model can
+ignore is not a boundary.
+
+| mode | shell (`bash`) | write / edit | use |
+|---|---|---|---|
+| `readonly` | ❌ | ❌ | answering questions about code |
+| `safe` (default) | ❌ | ✅ | everyday assistant work |
+| `full` | ✅ | ✅ | tasks that must run commands |
+
+`--exclude-tools` is passed to pi itself, so the tool is not *degraded* — it is absent.
+
+**Environment scrubbing.** The child no longer inherits `process.env`. It gets an OS whitelist
+(`PATH`, `SystemRoot`, `TEMP`, …) plus a handful of control variables. pi reads its model
+credentials from its own config directory, so nothing needed is lost — and a shell can no
+longer `echo $FEISHU_APP_SECRET`.
+
+**Workspace guard.** `pi-rt sandbox` refuses to run in a drive root, the home directory, or any
+path shallower than two segments. Running the agent at `C:\` means every absolute path it
+invents is in scope.
+
+Verified live, not assumed:
+
+```
+readonly  → "本次会话我只挂载了 read 工具，没有写文件或执行命令的能力"
+            sandbox-probe.txt was NOT created
+safe      → "当前会话只挂载了 read / edit / write 三个文件工具，没有 shell 执行工具"
+full      → parent exported PI_RT_TEST_SECRET=TOPSECRET-123;
+            inside the child the variable is UNSET
+```
+
+### What this is not
+
+This machine has no Docker, no WSL, and Windows 11 Home has no Windows Sandbox, so there is **no
+OS-level isolation** here. The honest boundary:
+
+- the `read` tool can still read any file the user can read — including pi's own credential
+  file, which is why `readonly` is the only mode worth using on an untrusted task;
+- there is no network restriction;
+- `full` mode is unconstrained by design, and the env scrub is the only thing standing between a
+  shell and a secret.
+
+Real isolation needs a container or a VM. What is implemented here is *capability limiting*,
+which removes the sharpest edges (`rm -rf`, `git push --force`, arbitrary processes) at low cost.
+
 ## Long-term upkeep: archive and backup
 
 Two different problems, two different mechanisms.
