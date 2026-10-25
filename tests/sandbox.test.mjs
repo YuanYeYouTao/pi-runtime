@@ -29,7 +29,7 @@ const check = (name, ok, extra = "") => {
 {
   check("full removes nothing", excludedTools("full").length === 0);
   check("safe removes the shell", excludedTools("safe").join(",") === "bash");
-  check("readonly removes shell and writers", excludedTools("readonly").sort().join(",") === "bash,edit,write");
+  check("readonly removes shell, writers and MCP", excludedTools("readonly").sort().join(",") === "bash,edit,mcp__*,write", excludedTools("readonly").join(","));
   check("flags are passed to pi", toolArgs("safe").join(" ") === "--exclude-tools bash");
   check("full adds no flags", toolArgs("full").length === 0);
   check("every mode is described", ["readonly", "safe", "full"].every((mode) => describePolicy(mode).length > 0));
@@ -72,7 +72,7 @@ const check = (name, ok, extra = "") => {
 {
   const report = sandboxReport("readonly", process.cwd());
   check("report carries the mode", report.mode === "readonly");
-  check("report lists exclusions", report.excluded.length === 3);
+  check("report lists exclusions", report.excluded.length === 4, JSON.stringify(report.excluded));
   check("report resolves the workspace", path.isAbsolute(report.workspace));
   check("report flags a bad workspace", sandboxReport("safe", path.parse(process.cwd()).root).workspaceOk === false);
 }

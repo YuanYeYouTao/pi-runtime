@@ -20,6 +20,8 @@ import { runMaintenance } from "./maintenance.ts";
 import { archiveConversationEvents, backupDatabase, inspectArchives, newestBackupAgeHours } from "./archive.ts";
 import { normalizeMode, sandboxReport } from "./sandbox.ts";
 import { exportMemoryToGit } from "./memory-git.ts";
+import { summarizeToolCalls, listMcpServers, formatToolReport } from "./tools-report.ts";
+import { describePolicy } from "./sandbox.ts";
 import { Gate } from "./gate.ts";
 import { buildDigest, buildSplitPrompt, canSpawn, parseSubtasks, runWithLimit } from "./subagent.ts";
 import type { ChildResult } from "./subagent.ts";
@@ -64,6 +66,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts sandbox [--mode readonly|safe|full]  工具能力策略
   node src/cli.ts memory-git [--message "..."]   把记忆导出成可 diff 的 Git 仓库
   node src/cli.ts tree <task-id>                   查看任务与子 Agent 的派生树
+  node src/cli.ts tools [--days 30] [--json]      工具调用审计（次数/成功率/耗时）+ MCP 清单
   node src/cli.ts ask "..." --spawn N              拆成 N 个子 Agent 并行执行后汇总
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
@@ -419,6 +422,29 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdTools(args: string[]): number {
+  const days = Number(flagValue(args, "--days") ?? 30);
+  const asJson = args.includes("--json");
+  const cfg = loadConfig();
+  const store = new Store(DB_PATH);
+  try {
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const stats = summarizeToolCalls(store.toolCallRows(since));
+    const servers = listMcpServers(DATA_DIR);
+
+    if (asJson) {
+      console.log(JSON.stringify({ days, sandbox: cfg.sandbox, servers, stats }, null, 2));
+      return 0;
+    }
+    for (const line of formatToolReport(stats, servers)) console.log(line);
+    console.log(`沙箱     ${cfg.sandbox} · ${describePolicy(cfg.sandbox)}`);
+    console.log(`统计范围 最近 ${days} 天`);
+    return 0;
+  } finally {
+    store.close();
+  }
 }
 
 function cmdTree(args: string[]): number {
@@ -1191,6 +1217,8 @@ async function main(): Promise<number> {
       return cmdMemoryGit(rest);
     case "tree":
       return cmdTree(rest);
+    case "tools":
+      return cmdTools(rest);
     case "backup":
       return cmdBackup(rest);
     case "resolve":

@@ -240,6 +240,15 @@ export class Store {
     return this.db.prepare("SELECT seq, type, payload, created_at FROM events WHERE task_id = ? ORDER BY seq ASC").all(taskId) as any[];
   }
 
+  /** Tool execution events since a timestamp, oldest first (start/end pairs are matched by id). */
+  toolCallRows(sinceIso: string): Array<{ type: string; payload: string; created_at: string }> {
+    return this.db
+      .prepare(
+        "SELECT type, payload, created_at FROM events WHERE type IN ('tool_execution_start', 'tool_execution_end') AND created_at >= ? ORDER BY seq ASC",
+      )
+      .all(sinceIso) as Array<{ type: string; payload: string; created_at: string }>;
+  }
+
   /** Row count and total payload bytes, for before/after reporting. */
   eventStats(): { rows: number; bytes: number } {
     const row = this.db.prepare("SELECT COUNT(*) AS rows, COALESCE(SUM(LENGTH(payload)), 0) AS bytes FROM events").get() as {

@@ -26,8 +26,13 @@ export function normalizeMode(input?: string | null): SandboxMode {
 export function excludedTools(mode: SandboxMode): string[] {
   switch (mode) {
     case "readonly":
-      return ["bash", "write", "edit"];
+      // `mcp__*` is included on purpose. An MCP server declares its own capabilities and we
+      // cannot inspect them, so a "read-only" mode that leaves MCP enabled is not read-only —
+      // one `pi mcp add` (by anyone) would silently reopen write access.
+      return ["bash", "write", "edit", "mcp__*"];
     case "safe":
+      // MCP stays available here, but the runtime records which servers were enabled, because
+      // "safe" only promises no shell — it does not promise every external tool is harmless.
       return ["bash"];
     case "full":
     default:

@@ -193,6 +193,16 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
   - 无变化不提交；历史不重写（可 diff / 可回滚）
 - [x] 修复：`git rev-parse` 会向上找到父仓库，曾把投影提交进主仓库 —— 改为只检查目录内 `.git`
 
+## Phase 3.5 — 工具审计与 MCP 边界 ✅
+
+- [x] **修沙箱后门**：`readonly` 现在排除 `mcp__*`
+  - 原来只排除 `bash/write/edit`，MCP 工具完全不受限 —— 挂一个 filesystem server 就能写
+  - 理由：MCP server 自声明能力，我们无法判断它是否只读；"只读"必须连未知能力一起关掉
+- [x] `pi-rt tools [--days N] [--json]`：按工具聚合次数 / 成功率 / 平均耗时 + MCP 清单
+  - 成败取 `tool_execution_end.isError`，耗时靠 start/end 配对；缺 start 时显示未知而非 0
+- [x] 结论：**不重写 MCP 协议**（pi 已有客户端），也不包装 `pi mcp add`（它已经写了正确的位置）
+- [ ] 真接一个 MCP server 做端到端（需下载 npm 包，网络不稳时跳过）
+
 ## Phase 3.4 — 子 Agent（spawn）✅
 
 三份 JD 的共同缺口（面壁 JD1-1「子 Agent spawn 派生 + 嵌套深度/并发限流」、词元 JD3-3「子 Agent 编排与结果聚合」）：
