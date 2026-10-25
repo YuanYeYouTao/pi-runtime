@@ -193,6 +193,20 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
   - 无变化不提交；历史不重写（可 diff / 可回滚）
 - [x] 修复：`git rev-parse` 会向上找到父仓库，曾把投影提交进主仓库 —— 改为只检查目录内 `.git`
 
+## Phase 3.4 — 子 Agent（spawn）✅
+
+三份 JD 的共同缺口（面壁 JD1-1「子 Agent spawn 派生 + 嵌套深度/并发限流」、词元 JD3-3「子 Agent 编排与结果聚合」）：
+
+- [x] `ask --spawn N`：模型自己拆分 → 并行执行 → 父回合汇总
+- [x] **独立上下文**：子任务跑在 `<thread>#subN`（第一版共用线程，日志暴露了问题）
+- [x] **并发上限**：子任务独立 `Gate`，默认 3（`PI_RT_SPAWN_CONCURRENCY`）
+- [x] **失败隔离**：单个子任务失败不中断整批，汇总时标明缺失
+- [x] **深度限制**：`canSpawn(depth, PI_RT_MAX_DEPTH)`，默认 1（子任务不能再派生子任务）
+- [x] **聚合有界**：每个子任务输出截断 1200 字符
+- [x] 任务谱系：`tasks.parent_task_id` + `spawn_index`，`pi-rt tree` 可视化
+- [x] 实测：4 个节点（拆分/子1/子2/汇总），总耗时 8s，子任务 2s 并行
+- [ ] 孙任务（嵌套深度 > 1）：机制已就绪，缺一个真实用例
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）

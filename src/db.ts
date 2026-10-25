@@ -70,6 +70,9 @@ export class Store {
     // v2 columns: tasks now belong to a conversation thread and track distillation.
     this.ensureColumn("tasks", "thread", "TEXT NOT NULL DEFAULT 'default'");
     this.ensureColumn("tasks", "distilled_at", "TEXT");
+    // Sub-agent lineage: which parent spawned this task, and its position in the batch.
+    this.ensureColumn("tasks", "parent_task_id", "TEXT");
+    this.ensureColumn("tasks", "spawn_index", "INTEGER");
 
     // Append-only conversation log. Every memory must point at one of these rows by id,
     // which is what makes "evidence" checkable instead of rhetorical.
@@ -154,6 +157,24 @@ export class Store {
       .prepare("INSERT INTO tasks (id, prompt, cwd, status, created_at, updated_at, thread) VALUES (?, ?, ?, 'queued', ?, ?, ?)")
       .run(id, prompt, cwd, ts, ts, thread);
     return id;
+  }
+
+  /** A child task carries its parent and its position, so the tree is reconstructible. */
+  createChildTask(prompt: string, cwd: string, thread: string, parentTaskId: string, spawnIndex: number): string {
+    const id = shortId();
+    const ts = now();
+    this.db
+      .prepare(
+        "INSERT INTO tasks (id, prompt, cwd, status, created_at, updated_at, thread, parent_task_id, spawn_index) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+      )
+      .run(id, prompt, cwd, ts, ts, thread, parentTaskId, spawnIndex);
+    return id;
+  }
+
+  childrenOf(parentTaskId: string): TaskRow[] {
+    return this.db
+      .prepare("SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY spawn_index ASC")
+      .all(parentTaskId) as TaskRow[];
   }
 
   getTask(id: string): TaskRow | null {

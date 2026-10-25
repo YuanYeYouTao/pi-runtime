@@ -83,8 +83,14 @@ export async function runTask(
   task: TaskRow,
   hooks: RunHooks = {},
   memory: MemoryStore | null = null,
+  /**
+   * Sub-agents share a run but not necessarily the parent's concurrency budget: a batch of
+   * children is supposed to run *in parallel*, while the parent's gate exists to serialise
+   * unrelated tasks. Passing a gate keeps the two policies from fighting each other.
+   */
+  gate?: Gate,
 ): Promise<string> {
-  const release = await gateFor(cfg).acquire();
+  const release = await (gate ?? gateFor(cfg)).acquire();
   try {
     const today = store.usageToday();
     if (cfg.limits.dailyTokens > 0 && today.total >= cfg.limits.dailyTokens) {

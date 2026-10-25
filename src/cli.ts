@@ -20,6 +20,9 @@ import { runMaintenance } from "./maintenance.ts";
 import { archiveConversationEvents, backupDatabase, inspectArchives, newestBackupAgeHours } from "./archive.ts";
 import { normalizeMode, sandboxReport } from "./sandbox.ts";
 import { exportMemoryToGit } from "./memory-git.ts";
+import { Gate } from "./gate.ts";
+import { buildDigest, buildSplitPrompt, canSpawn, parseSubtasks, runWithLimit } from "./subagent.ts";
+import type { ChildResult } from "./subagent.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -60,6 +63,8 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts backup [--keep 7]               压缩快照数据库
   node src/cli.ts sandbox [--mode readonly|safe|full]  工具能力策略
   node src/cli.ts memory-git [--message "..."]   把记忆导出成可 diff 的 Git 仓库
+  node src/cli.ts tree <task-id>                   查看任务与子 Agent 的派生树
+  node src/cli.ts ask "..." --spawn N              拆成 N 个子 Agent 并行执行后汇总
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -156,6 +161,68 @@ async function cmdLogin(): Promise<number> {
   });
 }
 
+/**
+ * Spawn N sub-agents, then have a parent turn synthesise their reports.
+ *
+ * The split is done by the model rather than by punctuation: the boundaries should follow the
+ * work, not the formatting. Children get their own gate so a batch runs in parallel even
+ * though unrelated tasks stay serialised.
+ */
+async function runSpawned(
+  store: Store,
+  cfg: ReturnType<typeof loadConfig>,
+  memory: ReturnType<typeof openMemory>,
+  prompt: string,
+  thread: string,
+  count: number,
+): Promise<number> {
+  const concurrency = Math.max(1, Math.min(count, Number(process.env.PI_RT_SPAWN_CONCURRENCY ?? 3)));
+  const gate = new Gate(concurrency, 0);
+  const root = store.createTask(prompt, cfg.workspace, thread);
+  console.log(`task ${root} queued  (thread: ${thread}  spawn: ${count} 并发: ${concurrency})\n`);
+
+  const status = (message: string) => dim(message);
+
+  const splitTask = store.createChildTask(buildSplitPrompt(prompt, count), cfg.workspace, thread, root, 0);
+  const splitOut = await runTask(store, cfg, store.getTask(splitTask)!, { onStatus: status }, memory, gate);
+  const specs = parseSubtasks(splitOut, count);
+  if (specs.length === 0) {
+    store.failTask(root, "拆分失败：模型没有返回可用的子任务 JSON");
+    console.error("拆分失败：模型没有返回可用的子任务 JSON");
+    return 1;
+  }
+  console.log(`拆成 ${specs.length} 个子任务：`);
+  for (const spec of specs) console.log(`  ${spec.index}. ${spec.title}`);
+
+  const results: ChildResult[] = await runWithLimit(specs, concurrency, async (spec) => {
+    // Children get their own thread: they must not see the parent's conversation history, and
+    // their turns must not be distilled into the parent's memory. Sharing a thread made the
+    // "independent context" claim false — each child was reading the whole window.
+    const childThread = `${thread}#sub${spec.index}`;
+    const taskId = store.createChildTask(spec.prompt, cfg.workspace, childThread, root, spec.index);
+    const started = Date.now();
+    console.log(`\n--- 子任务 ${spec.index}/${specs.length} ${spec.title} (${taskId}) ---`);
+    try {
+      const output = await runTask(store, cfg, store.getTask(taskId)!, { onStatus: status }, memory, gate);
+      console.log(`  完成 ${output.length} 字符，${Math.round((Date.now() - started) / 1000)}s`);
+      return { index: spec.index, title: spec.title, status: "ok", output, taskId, ms: Date.now() - started };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`  失败：${message}`);
+      return { index: spec.index, title: spec.title, status: "failed", output: "", error: message, taskId, ms: Date.now() - started };
+    }
+  });
+
+  const ok = results.filter((item) => item.status === "ok").length;
+  console.log(`\n子任务完成 ${ok}/${results.length}，开始汇总…\n`);
+
+  const synthTask = store.createChildTask(`${prompt}\n\n${buildDigest(results)}`, cfg.workspace, thread, root, specs.length + 1);
+  const final = await runTask(store, cfg, store.getTask(synthTask)!, { onText: (delta) => process.stdout.write(delta), onStatus: status }, memory, gate);
+  store.finishTask(root, final);
+  console.log(`\n\ntask ${root} done — ${final.length} chars (子任务 ${ok}/${results.length})\n`);
+  return 0;
+}
+
 async function cmdAsk(args: string[]): Promise<number> {
   const sandboxFlag = args.indexOf("--sandbox");
   if (sandboxFlag !== -1) {
@@ -163,6 +230,9 @@ async function cmdAsk(args: string[]): Promise<number> {
     args.splice(sandboxFlag, 2);
     process.env.PI_RT_SANDBOX = mode;
   }
+  const spawnFlag = args.indexOf("--spawn");
+  const spawnCount = spawnFlag === -1 ? 0 : Math.max(2, Math.min(6, Number(args[spawnFlag + 1] ?? 0) || 0));
+  if (spawnFlag !== -1) args.splice(spawnFlag, 2);
   const cwdFlag = flagValue(args, "--cwd");
   const thread = flagValue(args, "--thread") ?? "default";
   const extract = args.includes("--extract");
@@ -177,6 +247,13 @@ async function cmdAsk(args: string[]): Promise<number> {
   if (cwdFlag) cfg.workspace = cwdFlag;
   const store = new Store(DB_PATH);
   const memory = openMemory();
+  if (spawnCount > 0) {
+    if (!canSpawn(0, Number(process.env.PI_RT_MAX_DEPTH ?? 1))) {
+      console.error("PI_RT_MAX_DEPTH=0 时禁止派生");
+      return 2;
+    }
+    return runSpawned(store, cfg, memory, prompt, thread, spawnCount);
+  }
   const id = store.createTask(prompt, cfg.workspace, thread);
   console.log(`task ${id} queued  (thread: ${thread}  workspace: ${cfg.workspace})\n`);
 
@@ -342,6 +419,38 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdTree(args: string[]): number {
+  const id = args[0];
+  if (!id) {
+    console.error("usage: node src/cli.ts tree <task-id>");
+    return 2;
+  }
+  const store = new Store(DB_PATH);
+  try {
+    const root = store.getTask(id);
+    if (!root) {
+      console.error(`task not found: ${id}`);
+      return 1;
+    }
+    const ms = (task: { created_at: string; updated_at: string }) =>
+      Math.max(0, new Date(task.updated_at).getTime() - new Date(task.created_at).getTime());
+    const line = (task: any, prefix: string) => {
+      const chars = task.result ? `${task.result.length} 字符` : "-";
+      console.log(`${prefix}${task.id}  ${String(task.status).padEnd(7)} ${chars.padEnd(11)} ${Math.round(ms(task) / 1000)}s  ${String(task.prompt).slice(0, 46)}`);
+    };
+    line(root, "");
+    for (const child of store.childrenOf(root.id)) line(child, "  └─ ");
+    const kids = store.childrenOf(root.id);
+    if (kids.length > 0) {
+      const ok = kids.filter((k) => k.status === "done").length;
+      console.log(`\n子任务 ${ok}/${kids.length} 成功，总耗时 ${Math.round(ms(root) / 1000)}s`);
+    }
+    return 0;
+  } finally {
+    store.close();
+  }
 }
 
 function cmdMemoryGit(args: string[]): number {
@@ -1080,6 +1189,8 @@ async function main(): Promise<number> {
       return cmdSandbox(rest);
     case "memory-git":
       return cmdMemoryGit(rest);
+    case "tree":
+      return cmdTree(rest);
     case "backup":
       return cmdBackup(rest);
     case "resolve":
