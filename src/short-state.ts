@@ -84,7 +84,7 @@ export class ShortStateStore {
 
     // Short state is injected into prompts, so it is held to the same standard as memory:
     // a credential must not live here either. The name check catches bare values that no
-    // pattern could recognise (e.g. `db_password = Passw0rd!2024`).
+    // pattern could recognise (e.g. a slot named like a credential whose value looks like an ordinary word).
     if (isSensitiveName(normalized) || detectSecret(value).sensitive) {
       throw new Error(`拒绝写入：${normalized} 看起来是凭据，短状态同样不保存密钥`);
     }

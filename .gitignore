@@ -5,3 +5,8 @@ config.json
 *.log
 eval/tmp/
 .DS_Store
+
+# 部署时填写的真实密钥，绝不能进仓库
+deploy/.env
+deploy/*.env
+!deploy/env.example

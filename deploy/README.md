@@ -105,3 +105,9 @@ OSS 同步示例（可选，用 ossutil 或 aliyun-cli）：
 3. **凭证在文件里**：`/srv/pi-rt/data/pi` 存模型凭证，`deploy/.env` 存飞书 secret。两者都要 600 权限，且**不要进 git**（`.gitignore` 已含 `data/`、`config.json`）。
 4. **重启会中断对话**：进行中的任务会失败；已完成的记忆和事件不受影响（WAL + 事务）。
 5. **沙箱在容器里才真正生效**：裸机部署时 `safe` 只是关掉 shell 工具，agent 仍能读你用户可读的文件。
+
+## 安全
+
+- `deploy/.env` 含真实密钥，已在 `.gitignore` 中，**永远不要提交**。
+- 推送前跑一次 `node scripts/leakscan.mjs`：它按“形状”扫描工作区与历史，找 IP、open_id、token、私钥、赋值式密码；测试夹具和占位符会自动豁免。
+- 服务器密码若曾出现在任何文本里，立刻 `passwd` 更换，并改用 SSH 密钥登录（`PasswordAuthentication no`）。
