@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      # --ignore-scripts: nothing here needs a lifecycle script, and skipping them keeps the
+      # install reproducible (same flag the Dockerfile uses).
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: tests
+        run: node scripts/test-all.mjs
+
+      # Fails the build if a tracked file or a commit message looks like a credential.
+      - name: secret scan
+        run: node scripts/leakscan.mjs
+
+      - name: deploy scripts are valid bash
+        run: |
+          bash -n deploy/bootstrap.sh
+          bash -n deploy/pi-rt.service 2>/dev/null || true
