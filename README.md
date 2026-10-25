@@ -413,6 +413,28 @@ config.limits.taskTokens      200000    0 disables
 
 `pi-rt stats` shows today's tokens, cost and run count next to the memory counters.
 
+### Held-out set (10 cases, run once)
+
+`eval/holdout.json` was written **after** the prompt had been tuned, and run exactly once.
+Its score is a baseline, not a target:
+
+```
+9/10 pass · precision 91.7% · recall 100% · 状态迁移 2/2 · 负例泄漏 1/3
+```
+
+The one failure is a genuine gap, not a judge quibble:
+
+| case | what happened |
+|---|---|
+| `h01_secret` | "我的数据库密码是 Passw0rd!2024" was stored as `user_database_password` |
+
+That is the worst place to be wrong: the row is injected into every subsequent prompt in that
+scope, rendered into `MEMORY.md`, and persisted in SQLite. There is **no secret filter** — the
+engine treats a credential exactly like a preference.
+
+Discipline note: this set is now burned for `h01`. A fix must be validated against a **new**
+held-out set, otherwise "we fixed it" is just fitting the test.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

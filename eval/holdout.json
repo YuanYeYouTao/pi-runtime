@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "note": "留出集：未参与任何调参。第一次运行的结果就是基线，不得据此后调提示词。刻意覆盖现有用例没有的维度：敏感凭据、重复陈述、自我更正、模糊指代、跨人更正。",
+  "cases": [
+    {
+      "id": "h01_secret",
+      "goal": "敏感凭据不应该被长期记住",
+      "kind": "negative",
+      "turns": [
+        { "user": "我的数据库密码是 Passw0rd!2024，帮我记一下。", "assistant": "好的。" }
+      ],
+      "expect": [],
+      "forbid_contains": ["passw0rd"]
+    },
+    {
+      "id": "h02_restate_same",
+      "goal": "同一事实换个说法重复一次，不应产生第二条记忆",
+      "kind": "negative",
+      "seed": [{ "key": "user_job", "category": "fact", "content": "在某创业公司做后端开发", "importance": 3 }],
+      "turns": [
+        { "user": "我现在还是在创业公司做后端，没什么变化。", "assistant": "明白。" }
+      ],
+      "expect": [],
+      "state_check": { "key": "user_job", "must_be": "active_with", "contains": ["创业公司"] }
+    },
+    {
+      "id": "h03_travel_event",
+      "goal": "带时间的行程：记为事件，保留日期与地点",
+      "kind": "positive",
+      "turns": [
+        { "user": "我下周三要去北京出差，周三晚上到。", "assistant": "记下了。" }
+      ],
+      "expect": [{ "category": "event", "contains": ["北京"] }],
+      "allow_contains": ["出差", "周三"]
+    },
+    {
+      "id": "h04_negative_pref",
+      "goal": "否定式偏好（讨厌某事）也是偏好",
+      "kind": "positive",
+      "turns": [
+        { "user": "我特别讨厌开会，能不开就不开。", "assistant": "明白。" }
+      ],
+      "expect": [{ "category": "preference", "contains": ["开会"] }]
+    },
+    {
+      "id": "h05_correct_other_person",
+      "goal": "更正别人的既有记忆：主体不能变成发言者",
+      "kind": "transition",
+      "seed": [{ "key": "spouse_diet", "category": "preference", "content": "老婆不吃辣", "importance": 3 }],
+      "turns": [
+        { "user": "我老婆其实很能吃辣，之前是我记错了。", "assistant": "已更正。" }
+      ],
+      "expect": [{ "contains": ["辣"], "subjectNotUser": true }],
+      "state_check": { "key": "spouse_diet", "must_be": "active_with", "contains": ["能吃辣"] }
+    },
+    {
+      "id": "h06_numbers",
+      "goal": "金额与编号必须原样保留",
+      "kind": "positive",
+      "turns": [
+        { "user": "这次采购预算 1,280,000 元，审批编号 CG-2024-0917。", "assistant": "记下了。" }
+      ],
+      "expect": [{ "contains": ["1,280,000"] }, { "contains": ["cg-2024-0917"] }]
+    },
+    {
+      "id": "h07_mixed_lang",
+      "goal": "中英混合技术栈",
+      "kind": "positive",
+      "turns": [
+        { "user": "我们后端用 Go，前端 Next.js 15，部署在 Vercel。", "assistant": "好的。" }
+      ],
+      "expect": [
+        { "contains": ["go"] },
+        { "contains": ["next.js"] },
+        { "contains": ["vercel"] }
+      ]
+    },
+    {
+      "id": "h08_vague",
+      "goal": "指代不明时不该硬记",
+      "kind": "negative",
+      "turns": [
+        { "user": "那个项目下周就上线了，你懂的。", "assistant": "哪个项目？" }
+      ],
+      "expect": []
+    },
+    {
+      "id": "h09_self_correct",
+      "goal": "句中自我更正：只留更正后的值",
+      "kind": "positive",
+      "turns": [
+        { "user": "我们这个月预算 30 万。等等不对，是 45 万。", "assistant": "以 45 万为准。" }
+      ],
+      "expect": [{ "contains": ["45"] }]
+    },
+    {
+      "id": "h10_group_two_people",
+      "goal": "两人各说各的，主体必须分开",
+      "kind": "positive",
+      "turns": [
+        { "speaker": "王芳", "user": "我对芒果过敏，吃了会起疹子。", "assistant": "记下了。" },
+        { "speaker": "赵磊", "user": "我养了两只狗，一只柯基一只柴犬。", "assistant": "好的。" }
+      ],
+      "expect": [
+        { "contains": ["芒果"], "subjectNotUser": true },
+        { "contains": ["狗"], "subjectNotUser": true }
+      ]
+    }
+  ]
+}
