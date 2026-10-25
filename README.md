@@ -599,6 +599,39 @@ Two things fall out of that:
 - `r2 = 0.69` says the fit is usable but noisy — the manifest records the ratio it used
   (`charsPerToken`) so a bad estimate is traceable rather than invisible.
 
+### Conflict hints
+
+When a memory line disagrees with something just said, the prompt gets a short hint:
+
+```
+## 上下文冲突提示
+- 记忆「部署端口是 3000」与最近对话不一致（相似度 0.23），以最近对话为准
+```
+
+**The read path never writes.** A heuristic that is wrong once would corrupt a fact
+permanently, so the hint only states precedence; the actual rewrite stays in distillation,
+where the four verdicts and the evidence check live. Every run emits `context_conflict`.
+
+Detecting this needs two signals, because either alone fails:
+
+| signal | example | why the other one fails |
+|---|---|---|
+| same topic + disjoint numbers | 端口是 `3000` → 端口改成 `8080` | bigram similarity is **0.23** — far below any usable threshold |
+| wording drift, no numbers | 「必须完全避开」→「偶尔吃一点没事」 | there is no number to compare |
+
+Similarity is measured by **containment** (`|A∩B| / min(|A|,|B|)`), not Jaccard: Jaccard
+punishes length, scoring the allergen rephrasing at 0.21 while containment scores it 0.42.
+The wording branch also requires that neither line carries a number, so "端口 8080 已确认"
+is not treated as contradicting "端口是 8080".
+
+Live check:
+
+```
+记忆: 部署端口是 3000       窗口: 部署端口改成 8080 了。
+→ context_conflict 事件已记录，记忆未被修改
+→ 回答: "当前部署端口是 8080 …… 长期记忆里的 3000 已作废"
+```
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

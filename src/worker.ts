@@ -316,6 +316,10 @@ async function runAttempt(
     });
     promptChars = finalPrompt.length;
     store.appendEvent(task.id, "context_plan", manifest);
+    if (manifest.conflicts.length > 0) {
+      store.appendEvent(task.id, "context_conflict", { conflicts: manifest.conflicts });
+      hooks.onStatus?.(`context: ${manifest.conflicts.length} 处冲突（以最近对话为准）`);
+    }
 
     // Parity harness for refactors: dump the exact prompt so two runs can be diffed byte-wise.
     if (process.env.PI_RT_PROMPT_DUMP) {

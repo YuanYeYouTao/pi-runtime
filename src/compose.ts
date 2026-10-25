@@ -56,6 +56,8 @@ export type ComposeManifest = {
   segments: SegmentReport[];
   skipped: string[];
   dedup: Array<{ kind: string; dropped: string; keptIn: string; similarity: number }>;
+  /** Memory lines that look like they disagree with the recent conversation. */
+  conflicts: Array<{ memory: string; window: string; similarity: number }>;
   evictions: Array<{ kind: string; droppedChars: number }>;
 };
 
@@ -68,13 +70,14 @@ export const DEFAULT_POLICIES: Record<string, SegmentPolicy> = {
   summary: { floor: 0, cap: 1000, drop: "tail" },
   window: { floor: 1200, cap: 2800, drop: "oldest" },
   retrieved: { floor: 0, cap: 800, drop: "lowest" },
+  conflicts: { floor: 0, cap: 300, drop: "tail" },
   current: { floor: 0, cap: MAX, drop: "none", protected: true },
 };
 
 const FALLBACK_POLICY: SegmentPolicy = { floor: 0, cap: MAX, drop: "none" };
 
 /** Cheapest to lose first. `current` and `instructions` are never in this list. */
-export const EVICTION_ORDER = ["retrieved", "short_state", "memory", "summary", "window"];
+export const EVICTION_ORDER = ["retrieved", "short_state", "memory", "conflicts", "summary", "window"];
 
 const DIVIDER = "\n\n---\n\n";
 
@@ -91,6 +94,101 @@ export function stripPrefix(line: string): string {
 
 /** Which segments are allowed to shadow which: a later segment wins. */
 const DEDUPE_PRIORITY = ["window", "short_state", "memory", "summary"];
+
+/**
+ * Bands for conflict detection.
+ *
+ * Below `min` the lines are unrelated; at or above `exact` they are duplicates and dedupe
+ * already handled them. In between: same topic, different content — worth flagging, because
+ * the user probably just changed their mind.
+ */
+export const CONFLICT_MIN = 0.5;
+export const CONFLICT_EXACT = 0.95;
+
+export type Conflict = { memory: string; window: string; similarity: number };
+
+/** Digits, thousands separators removed, as comparable strings. */
+function numbersIn(text: string): Set<string> {
+  return new Set((text.match(/\d[\d.,]*/g) ?? []).map((value) => value.replace(/[.,]/g, "")));
+}
+
+/** Character bigrams of the non-numeric part: the "topic" of a line. */
+function topicBigrams(text: string): Set<string> {
+  const clean = text.toLowerCase().replace(/[^\p{L}]/gu, "");
+  const grams = new Set<string>();
+  for (let i = 0; i < clean.length - 1; i++) grams.add(clean.slice(i, i + 2));
+  return grams;
+}
+
+/**
+ * Share of the smaller line's bigrams present in the larger one.
+ *
+ * Jaccard punishes length: "用户对花生过敏，必须完全避开" vs a rephrasing of it scores 0.21,
+ * below any usable threshold, while containment scores 0.42. Containment asks the question we
+ * actually have — "is this the same sentence, edited?" — instead of "are these the same size?".
+ */
+function containment(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const gram of a) if (b.has(gram)) shared++;
+  return shared / Math.min(a.size, b.size);
+}
+
+/**
+ * Find memory lines that disagree with a recent line.
+ *
+ * Two signals, because either alone is too weak:
+ * - **same topic, disjoint numbers**: "部署端口是 3000" vs "部署端口改成 8080" — the case that
+ *   matters most, and the one lexical similarity is worst at (0.23).
+ * - **wording drift without numbers**: containment ≥ 0.35, e.g. "必须完全避开" → "偶尔吃一点没事".
+ *   Requiring that neither side carries a number keeps "端口 8080 已确认" from looking like a
+ *   contradiction of "端口是 8080".
+ *
+ * Read paths must not rewrite memory: a heuristic that is wrong once would corrupt a fact
+ * permanently. Conflicts are surfaced as a hint ("the recent turn wins"); the rewrite is left
+ * to distillation, where the four verdicts and the evidence check live.
+ */
+export function findConflicts(memoryBody: string, windowBody: string, limit = 3): Conflict[] {
+  const windowLines = windowBody
+    .split("\n")
+    .map((line) => stripPrefix(line))
+    .filter((line) => line.length >= 8);
+  const found: Conflict[] = [];
+
+  for (const raw of memoryBody.split("\n")) {
+    if (raw.startsWith("#")) continue;
+    const line = stripPrefix(raw);
+    if (line.length < 8) continue;
+
+    const lineNumbers = numbersIn(line);
+    const lineTopic = topicBigrams(line);
+
+    for (const candidate of windowLines) {
+      const score = similarity(line, candidate);
+      if (score >= CONFLICT_EXACT) continue; // a duplicate; dedupe owns that case
+
+      const candidateNumbers = numbersIn(candidate);
+      const shareNumber = [...lineNumbers].some((value) => candidateNumbers.has(value));
+      const sharedTopic = [...lineTopic].filter((gram) => topicBigrams(candidate).has(gram)).length;
+
+      const byValue = lineNumbers.size > 0 && candidateNumbers.size > 0 && !shareNumber && sharedTopic >= 2;
+      const byWording =
+        lineNumbers.size === 0 && candidateNumbers.size === 0 && containment(lineTopic, topicBigrams(candidate)) >= 0.35;
+
+      if (byValue || byWording) {
+        found.push({ memory: raw.trim(), window: candidate, similarity: Number(score.toFixed(2)) });
+      }
+    }
+  }
+
+  // One hint per memory line is enough; keep the strongest match for each.
+  const best = new Map<string, Conflict>();
+  for (const conflict of found) {
+    const existing = best.get(conflict.memory);
+    if (!existing || conflict.similarity > existing.similarity) best.set(conflict.memory, conflict);
+  }
+  return [...best.values()].sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+}
 
 function policyFor(kind: string, overrides?: Record<string, SegmentPolicy>): SegmentPolicy {
   return overrides?.[kind] ?? DEFAULT_POLICIES[kind] ?? FALLBACK_POLICY;
@@ -169,6 +267,29 @@ export function compose(
     }
     segment.body = kept.join("\n").trim();
     reference.set(kind, kept);
+  }
+
+  // ---- conflict hints -------------------------------------------------------------------
+  // Computed after dedupe (an exact duplicate is not a conflict) and rendered as a hint, not
+  // as a rewrite: dropping a memory on a fuzzy match would lose valid facts.
+  const conflicts: Conflict[] = [];
+  const memorySegment = prepared.find((item) => item.kind === "memory" && item.body);
+  const windowSegment = prepared.find((item) => item.kind === "window" && item.body);
+  if (memorySegment && windowSegment) {
+    conflicts.push(...findConflicts(memorySegment.body, windowSegment.body));
+  }
+  if (conflicts.length > 0) {
+    const body = conflicts
+      .map((conflict) => `- 记忆「${conflict.memory.replace(/^[-*]\s*/, "").slice(0, 50)}」与最近对话不一致（相似度 ${conflict.similarity}），以最近对话为准`)
+      .join("\n");
+    const currentIndex = prepared.findIndex((item) => item.kind === "current");
+    const hint = {
+      kind: "conflicts",
+      title: "## 上下文冲突提示",
+      body,
+      policy: policyFor("conflicts", options.policies),
+    };
+    prepared.splice(currentIndex === -1 ? prepared.length : currentIndex, 0, hint);
   }
 
   const active = prepared.filter((segment) => segment.body.trim().length > 0);
@@ -279,6 +400,7 @@ export function compose(
       segments: reports,
       skipped,
       dedup,
+      conflicts,
       evictions,
     },
   };

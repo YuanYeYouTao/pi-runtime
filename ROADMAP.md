@@ -115,7 +115,12 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
   - 少于 8 个样本不启用；报告 `r2`，差的时候显式警告
   - `pi-rt calibrate [--backfill] [--reset]`，从 `usage.input ⨝ context_plan.usedChars` 回填
   - 实测：8 样本 → slope 0.3259、intercept 115、r2 0.692 → 3.07 chars/token（默认 3.5 低估约 12%）
-- [ ] P3-b 冲突裁决 / P4 检索段
+- [x] **P3-b 冲突裁决**：读路径只提示、不写库
+  - 两个信号：「同话题 + 数字不同」（词面相似度仅 0.23 也必须能抓到）、「无数字的措辞漂移」
+  - 相似度用**包含度**而非 Jaccard（长度惩罚会让改写句只有 0.21）
+  - 冲突提示渲染在当前消息之前，记 `context_conflict` 事件，记忆行**不变**
+  - 实测：记忆 3000 / 窗口 8080 → 提示生效，回答采用 8080 并说明 3000 作废
+- [ ] P4 检索段（仅在扫描实验证明有必要时启用）
 
 > "它为什么答错了？" —— 看 `context_plan`。
 
