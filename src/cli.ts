@@ -11,6 +11,7 @@ import { runContextEval } from "./eval-context.ts";
 import { PiRpc } from "./rpc.ts";
 import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
+import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
 import { TelegramChannel } from "./channels/telegram.ts";
@@ -37,6 +38,12 @@ memory:
   node src/cli.ts history <key>              full supersede / invalidate / contest chain
   node src/cli.ts events <thread>            the numbered conversation events
   node src/cli.ts thread <thread>            rolling summary + compression cursor
+
+short state (临时状态，按 key 命中，带 TTL):
+  node src/cli.ts state set <key> <value> [--ttl 12h] [--scope <thread>]
+  node src/cli.ts state list [--scope <thread>]
+  node src/cli.ts state prune                mark expired rows stale
+  node src/cli.ts state del <key> [--scope <thread>]
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -313,6 +320,64 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdState(args: string[]): number {
+  const sub = args.shift();
+  const ttlRaw = flagValue(args, "--ttl");
+  const scope = flagValue(args, "--scope") ?? "global";
+  const store = new ShortStateStore(DATA_DIR);
+
+  try {
+    switch (sub) {
+      case "set": {
+        const key = args[0];
+        const value = args.slice(1).join(" ").trim();
+        if (!key || !value) {
+          console.error('usage: node src/cli.ts state set <key> <value> [--ttl 12h] [--scope <thread>]');
+          return 2;
+        }
+        const row = store.set(key, value, { scope, ttlMs: ttlRaw ? parseTtl(ttlRaw) : undefined });
+        const hours = Math.round((Date.parse(row.expires_at) - Date.now()) / 3_600_000);
+        console.log(`set  ${row.key} = ${row.value}`);
+        console.log(`     scope=${row.scope}  约 ${hours} 小时后过期（${row.expires_at}）`);
+        return 0;
+      }
+      case "list":
+      case "ls": {
+        const rows = store.list(scope, 100);
+        if (rows.length === 0) {
+          console.log("(no active short state)");
+          return 0;
+        }
+        for (const row of rows) {
+          const hours = Math.max(0, Math.round((Date.parse(row.expires_at) - Date.now()) / 3_600_000));
+          console.log(`${row.key.padEnd(20)} = ${row.value.slice(0, 60).padEnd(40)} [${row.scope}]  ${hours}h left  used=${row.use_count}`);
+        }
+        return 0;
+      }
+      case "prune": {
+        const pruned = store.prune();
+        console.log(`marked ${pruned} row(s) stale`);
+        return 0;
+      }
+      case "del":
+      case "rm": {
+        const key = args[0];
+        if (!key) {
+          console.error("usage: node src/cli.ts state del <key> [--scope <thread>]");
+          return 2;
+        }
+        console.log(store.remove(key, scope) ? `deleted ${key}` : `not found: ${key}`);
+        return 0;
+      }
+      default:
+        console.error("usage: node src/cli.ts state <set|list|prune|del> ...");
+        return 2;
+    }
+  } finally {
+    store.close();
+  }
 }
 
 function cmdThread(args: string[]): number {
@@ -736,6 +801,8 @@ async function main(): Promise<number> {
       return cmdEvents(rest);
     case "thread":
       return cmdThread(rest);
+    case "state":
+      return cmdState(rest);
     case "resolve":
       return cmdResolve(rest);
     case "forget":

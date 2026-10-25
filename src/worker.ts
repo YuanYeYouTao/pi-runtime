@@ -3,6 +3,7 @@ import type { RpcRecord } from "./rpc.ts";
 import type { Store, TaskRow } from "./db.ts";
 import type { MemoryStore } from "./memory.ts";
 import { buildConversationContext } from "./context.ts";
+import { ShortStateStore } from "./short-state.ts";
 import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
 import { withRetry } from "./retry.ts";
@@ -243,6 +244,24 @@ async function runAttempt(
 
     const sections: string[] = [];
     if (injected.text) sections.push(injected.text);
+
+    // Short state goes before long-term memory: it is newer, so on a key collision its value
+    // must be the one the model reads last.
+    {
+      const shortState = new ShortStateStore(cfg.dataDir);
+      try {
+        const block = shortState.contextBlock(300, task.thread);
+        if (block.text) {
+          sections.push(block.text);
+          store.appendEvent(task.id, "short_state_injected", { keys: block.keys, chars: block.text.length });
+          hooks.onStatus?.(`short state: ${block.keys.length} 条`);
+          shortState.markUsed(block.keys, task.thread);
+        }
+      } finally {
+        shortState.close();
+      }
+    }
+
     if (summary.trim()) sections.push(`## 更早对话的摘要（已压缩，因果细节以最近对话为准）\n${summary.trim()}`);
     if (context.text) sections.push(`## 最近对话（同一会话，按时间顺序）\n${context.text}`);
     sections.push(`## 当前消息\n${task.prompt}`);

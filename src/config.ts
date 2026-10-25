@@ -39,6 +39,8 @@ export type LimitConfig = {
 };
 
 export type RuntimeConfig = {
+  /** Absolute path of the data directory (database, memory files). */
+  dataDir: string;
   provider?: string;
   model?: string;
   /** Working directory the agent operates in. */
@@ -80,6 +82,7 @@ export function loadConfig(): RuntimeConfig {
   const file = path.join(ROOT, "config.json");
   const raw = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   return {
+    dataDir: DATA_DIR,
     provider: process.env.PI_RT_PROVIDER ?? raw.provider,
     model: process.env.PI_RT_MODEL ?? raw.model,
     workspace: path.resolve(process.env.PI_RT_WORKSPACE ?? raw.workspace ?? process.cwd()),
