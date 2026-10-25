@@ -255,6 +255,46 @@ Why polling for Telegram: a personal agent lives behind NAT on a laptop, so a we
 
 Identity matters because `current_speaker` is relative to the event. Without `Members`, two people's facts collapse into one `user` slot; with it, each row carries `member:张三` or `member:李四`, and the extractor is told who is speaking in each line.
 
+## Context
+
+Memory is what the agent knows forever; context is what it can still see. They are different
+mechanisms, and this runtime had neither until the window was added.
+
+Every prompt is assembled as:
+
+```
+① 长期记忆（scoped, 1800 chars）
+② 最近对话（last N messages, 4000 chars）
+③ 当前消息
+```
+
+Two rules in `src/context.ts`:
+
+- **Newest wins.** The budget is consumed from the end backwards, so the latest exchange is
+  always present. A window that drops the most recent turn is worse than no window.
+- **A single oversized message is still kept.** The current question must never be squeezed
+  out by its own length or by older chatter.
+
+The window is a *view*, not storage: events stay append-only, so compaction can later
+summarise the same rows without losing the originals.
+
+```
+config.context.turns        6      how many messages
+config.context.budgetChars  4000   hard character cap
+```
+
+Verified by an A/B on a fact that exists only in the previous turn:
+
+```
+turn 1  "我给我的机械键盘换了静音轴，型号是 TTC 冰静"
+turn 2  "那套轴体适合在开放式办公室用吗？"
+        with window    → "冰静本身非常适合开放式办公室…"
+        empty thread   → "如果你告诉我型号，我可以直接给出结论…"
+```
+
+`context_injected` is recorded per task (`{ids, messages, chars}`), so "what did it actually
+see" is answerable after the fact.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

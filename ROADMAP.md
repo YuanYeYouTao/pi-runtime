@@ -51,6 +51,19 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > "上下文窗口满了怎么办？压缩会丢什么？你怎么验证没丢关键信息？"
 
+## Phase 2.5 — 会话上下文（A 阶段）✅
+
+- [x] `src/context.ts`：最近 N 条消息 + 字符预算，纯函数、可单测
+- [x] 预算从最新往回收（最新的消息永不被挤掉；单条超长也保留）
+- [x] 拼装顺序：长期记忆 → 最近对话 → 当前消息
+- [x] 每任务记录 `context_injected {ids, messages, chars}`，事后可查"它当时看到了什么"
+- [x] 8 项单测（顺序/标签/取最新/预算截断/空历史/角色过滤）
+- [x] A/B 验证：上一轮才出现的事实，带窗口能答对，空线程直接反问"请告诉我型号"
+- [ ] B 阶段：`thread_state` 摘要 + 触发压缩（窗口满 → 压成结构化摘要）
+- [ ] 检索：优先用 bigram 相似度；FTS5 的 trigram 对 2 字中文失效（已实测）
+
+> "压缩会丢什么？你怎么验证没丢关键信息？"
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）

@@ -19,6 +19,13 @@ export const PI_CLI = path.join(
   "cli.js",
 );
 
+export type FeishuConfig = {
+  appId?: string;
+  appSecret?: string;
+  encryptKey?: string;
+  verificationToken?: string;
+};
+
 export type RuntimeConfig = {
   provider?: string;
   model?: string;
@@ -40,6 +47,11 @@ export type RuntimeConfig = {
   idleMinutes: number;
   /** Set false to disable automatic distillation (manual `distill` only). */
   autoExtract: boolean;
+  /** Feishu app credentials; env wins over config.json. */
+  feishu: FeishuConfig;
+  /** Recent-message window carried into every prompt. */
+  contextTurns: number;
+  contextBudgetChars: number;
 };
 
 export function ensureDirs(): void {
@@ -64,6 +76,14 @@ export function loadConfig(): RuntimeConfig {
     batchTurns: Number(process.env.PI_RT_BATCH_TURNS ?? raw.memory?.batchTurns ?? 10),
     idleMinutes: Number(process.env.PI_RT_IDLE_MINUTES ?? raw.memory?.idleMinutes ?? 15),
     autoExtract: (process.env.PI_RT_AUTO_EXTRACT ?? String(raw.memory?.autoExtract ?? true)) !== "false",
+    feishu: {
+      appId: process.env.FEISHU_APP_ID ?? raw.feishu?.appId,
+      appSecret: process.env.FEISHU_APP_SECRET ?? raw.feishu?.appSecret,
+      encryptKey: process.env.FEISHU_ENCRYPT_KEY ?? raw.feishu?.encryptKey,
+      verificationToken: process.env.FEISHU_VERIFICATION_TOKEN ?? raw.feishu?.verificationToken,
+    },
+    contextTurns: Number(process.env.PI_RT_CONTEXT_TURNS ?? raw.context?.turns ?? 6),
+    contextBudgetChars: Number(process.env.PI_RT_CONTEXT_BUDGET ?? raw.context?.budgetChars ?? 4_000),
   };
 }
 

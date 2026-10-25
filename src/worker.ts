@@ -2,6 +2,7 @@ import { PiRpc } from "./rpc.ts";
 import type { RpcRecord } from "./rpc.ts";
 import type { Store, TaskRow } from "./db.ts";
 import type { MemoryStore } from "./memory.ts";
+import { buildConversationContext } from "./context.ts";
 import { PI_CLI, piArgs, piEnv } from "./config.ts";
 import type { RuntimeConfig } from "./config.ts";
 
@@ -44,7 +45,6 @@ export async function runTask(
   const injected = memory && cfg.memoryEnabled
     ? memory.contextBlock(cfg.memoryBudgetChars, task.thread)
     : { text: "", ids: [] };
-  const finalPrompt = injected.text ? `${injected.text}\n\n---\n\n${task.prompt}` : task.prompt;
   if (injected.ids.length > 0) {
     store.appendEvent(task.id, "memory_injected", { ids: injected.ids, chars: injected.text.length });
     hooks.onStatus?.(`memory: 注入 ${injected.ids.length} 条 / ${injected.text.length} 字符`);
@@ -93,6 +93,28 @@ export async function runTask(
       const userEventId = store.addConversationEvent(task.thread, cfg.ownerName, "user", task.prompt, task.id);
       hooks.onStatus?.(`event #${userEventId} recorded`);
     }
+
+    // History is read *after* the current message is stored (or skipped), so the window is
+    // strictly "everything before this message" — the current text is never duplicated.
+    const lastId = store.lastEventId(task.thread);
+    const context = buildConversationContext(
+      store.threadEventsBefore(task.thread, lastId, cfg.contextTurns * 6),
+      { turns: cfg.contextTurns, budgetChars: cfg.contextBudgetChars },
+    );
+    if (context.messages > 0) {
+      store.appendEvent(task.id, "context_injected", {
+        ids: context.ids,
+        messages: context.messages,
+        chars: context.chars,
+      });
+      hooks.onStatus?.(`context: 携带 ${context.messages} 条历史 / ${context.chars} 字符`);
+    }
+
+    const sections: string[] = [];
+    if (injected.text) sections.push(injected.text);
+    if (context.text) sections.push(`## 最近对话（同一会话，按时间顺序）\n${context.text}`);
+    sections.push(`## 当前消息\n${task.prompt}`);
+    const finalPrompt = sections.join("\n\n---\n\n");
 
     await rpc.prompt(finalPrompt, cfg.maxMinutes * 60_000 + 5_000);
 

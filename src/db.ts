@@ -258,6 +258,20 @@ export class Store {
       .all(thread, limit) as ConversationEventRow[];
   }
 
+  /** Highest event id in a thread — the current message when building its prompt. */
+  lastEventId(thread: string): number {
+    const row = this.db.prepare("SELECT MAX(id) id FROM conversation_events WHERE thread = ?").get(thread) as { id: number | null };
+    return Number(row.id ?? 0);
+  }
+
+  /** Events strictly before `beforeId`, oldest first: the conversation window. */
+  threadEventsBefore(thread: string, beforeId: number, limit = 60): ConversationEventRow[] {
+    return this.db
+      .prepare("SELECT * FROM conversation_events WHERE thread = ? AND id < ? ORDER BY id DESC LIMIT ?")
+      .all(thread, beforeId, limit)
+      .reverse() as ConversationEventRow[];
+  }
+
   pendingEvents(thread?: string, limit = 40): ConversationEventRow[] {
     const sql = thread
       ? "SELECT * FROM conversation_events WHERE distilled_at IS NULL AND thread = ? ORDER BY id ASC LIMIT ?"

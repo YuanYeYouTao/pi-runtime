@@ -1,10 +1,19 @@
 {
   "ownerName": "YourName",
+  "ownerIds": [],
   "provider": "deepseek",
   "model": "deepseek-flash",
   "maxMinutes": 30,
   "memory": {
     "enabled": true,
     "budgetChars": 1800
+  },
+  "context": {
+    "turns": 6,
+    "budgetChars": 4000
+  },
+  "feishu": {
+    "appId": "cli_xxxxxxxxxxxx",
+    "appSecret": "your-app-secret"
   }
 }
