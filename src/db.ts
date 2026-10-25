@@ -250,6 +250,65 @@ export class Store {
     return Number(pages.page_count) * Number(size.page_size);
   }
 
+  /** Consistent snapshot to a plain file. Safe while the WAL database is being written. */
+  vacuumInto(target: string): void {
+    this.db.prepare("VACUUM INTO ?").run(target);
+  }
+
+  /**
+   * Events old enough to archive, minus the two kinds that must stay:
+   * those still awaiting distillation, and those cited as evidence by a live memory.
+   */
+  selectArchivableEvents(
+    cutoff: string,
+    includeUndistilled = false,
+  ): {
+    rows: Array<Record<string, unknown>>;
+    skippedEvidence: number;
+    skippedUndistilled: number;
+  } {
+    const pending = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM conversation_events
+          WHERE created_at < ? AND distilled_at IS NULL`,
+      )
+      .get(cutoff) as { n: number };
+    const evidence = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM conversation_events e
+          WHERE e.created_at < ?
+            AND EXISTS (SELECT 1 FROM memories m WHERE m.evidence_event_id = e.id)`,
+      )
+      .get(cutoff) as { n: number };
+
+    const undistilledClause = includeUndistilled ? "" : "AND distilled_at IS NOT NULL";
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM conversation_events e
+          WHERE e.created_at < ? ${undistilledClause}
+            AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.evidence_event_id = e.id)
+          ORDER BY e.id ASC`,
+      )
+      .all(cutoff) as Array<Record<string, unknown>>;
+
+    return { rows, skippedEvidence: Number(evidence.n), skippedUndistilled: Number(pending.n) };
+  }
+
+  deleteConversationEvents(ids: number[]): number {
+    if (ids.length === 0) return 0;
+    const statement = this.db.prepare("DELETE FROM conversation_events WHERE id = ?");
+    let deleted = 0;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const id of ids) deleted += Number(statement.run(id).changes);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return deleted;
+  }
+
   /**
    * Shrink existing oversized payloads to a preview.
    *

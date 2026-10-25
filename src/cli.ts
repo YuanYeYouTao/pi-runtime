@@ -15,6 +15,7 @@ import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
 import { NOISE_TYPES } from "./event-log.ts";
 import { runMaintenance } from "./maintenance.ts";
+import { archiveConversationEvents, backupDatabase, inspectArchives, newestBackupAgeHours } from "./archive.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -51,6 +52,8 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts state del <key> [--scope <thread>]
   node src/cli.ts calibrate [--backfill] [--reset]   token 估算校准
   node src/cli.ts compact [--dry-run] [--vacuum]    清理事件表里的流式增量
+  node src/cli.ts archive [--days 30] [--dry-run] [--list]   归档旧事件为 JSONL.gz
+  node src/cli.ts backup [--keep 7]               压缩快照数据库
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -327,6 +330,48 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdArchive(args: string[]): number {
+  const days = Number(flagValue(args, "--days") ?? loadConfig().archiveDays ?? 30);
+  const dryRun = args.includes("--dry-run");
+  const includeUndistilled = args.includes("--include-undistilled");
+  const list = args.includes("--list");
+  const store = new Store(DB_PATH);
+
+  try {
+    if (list) {
+      const summary = inspectArchives(DATA_DIR);
+      const age = newestBackupAgeHours(DATA_DIR);
+      console.log(`archive   ${summary.archive.files} 个文件 / ${(summary.archive.bytes / 1024).toFixed(1)} KB`);
+      console.log(`backups   ${summary.backups.files} 个文件 / ${(summary.backups.bytes / 1024).toFixed(1)} KB`);
+      console.log(`最新备份  ${age === null ? "无" : `${age.toFixed(1)} 小时前`}`);
+      return 0;
+    }
+
+    const result = archiveConversationEvents(store, DATA_DIR, { olderThanDays: days, dryRun, includeUndistilled });
+    console.log(`${dryRun ? "可归档" : "已归档"}  ${result.events} 条事件（${days} 天前，已提炼）`);
+    if (result.skippedEvidence > 0) console.log(`保留      ${result.skippedEvidence} 条：被记忆引用为证据`);
+    if (result.skippedUndistilled > 0) console.log(`保留      ${result.skippedUndistilled} 条：尚未提炼`);
+    if (result.file) console.log(`文件      ${result.file}（${(result.bytes / 1024).toFixed(1)} KB）`);
+    if (dryRun) console.log("（预览模式，未做修改）");
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+function cmdBackup(args: string[]): number {
+  const keep = Number(flagValue(args, "--keep") ?? loadConfig().backupKeep ?? 7);
+  const store = new Store(DB_PATH);
+  try {
+    const result = backupDatabase(store, DATA_DIR, keep);
+    console.log(`备份完成  ${result.file}（${(result.bytes / 1024).toFixed(1)} KB）`);
+    if (result.pruned.length > 0) console.log(`清理旧备份 ${result.pruned.length} 个（保留 ${keep}）`);
+    return 0;
+  } finally {
+    store.close();
+  }
 }
 
 function cmdCompact(args: string[]): number {
@@ -703,6 +748,18 @@ async function cmdServe(args: string[]): Promise<number> {
             if (report.distilled.length > 0) parts.push(`提炼 ${report.distilled.length} 个闲置线程`);
             if (report.failed.length > 0) parts.push(`${report.failed.length} 个失败`);
             if (report.pruned > 0) parts.push(`清理 ${report.pruned} 条过期短状态`);
+
+            // Daily snapshot: "yesterday" must always be recoverable without a manual command.
+            const age = newestBackupAgeHours(DATA_DIR);
+            if (age === null || age >= 24) {
+              try {
+                const backup = backupDatabase(store, DATA_DIR, cfg.backupKeep);
+                parts.push(`备份 ${(backup.bytes / 1024).toFixed(0)} KB`);
+              } catch (error) {
+                parts.push(`备份失败 ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
+
             if (parts.length > 0) dim(`[maintenance] ${parts.join("，")}`);
           })
           .catch((error) => dim(`[maintenance] ${error instanceof Error ? error.message : String(error)}`));
@@ -942,6 +999,10 @@ async function main(): Promise<number> {
       return cmdCalibrate(rest);
     case "compact":
       return cmdCompact(rest);
+    case "archive":
+      return cmdArchive(rest);
+    case "backup":
+      return cmdBackup(rest);
     case "resolve":
       return cmdResolve(rest);
     case "forget":

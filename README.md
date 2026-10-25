@@ -669,6 +669,35 @@ pi-rt compact --dry-run    # show what would go
 pi-rt compact --vacuum     # delete noise, truncate oversized payloads, reclaim space
 ```
 
+## Long-term upkeep: archive and backup
+
+Two different problems, two different mechanisms.
+
+**Archive** moves old conversation events out of the live table into `data/archive/*.jsonl.gz`
+and then deletes them. Three exclusions, each for a reason:
+
+| kept | why |
+|---|---|
+| not distilled yet | still pending work — archiving it loses the memory |
+| cited by a memory's `evidence_event_id` | deleting it would leave the evidence chain dangling |
+| recent | still inside the context window |
+
+The archive stores the original rows verbatim, so "we deleted it" is reversible.
+
+**Backup** is a compressed snapshot via `VACUUM INTO` — not a file copy, because the database
+runs in WAL mode and a copy can capture a torn state. `serve` takes one automatically when the
+newest backup is older than 24 hours.
+
+```bash
+pi-rt archive --days 30 --dry-run   # what would be moved
+pi-rt archive --days 30             # move it
+pi-rt archive --list                # archive + backup inventory, newest backup age
+pi-rt backup --keep 7               # snapshot now, keep the newest 7
+```
+
+Measured on this machine: database 0.49 MB → backup **86.5 KB**; with `--days 0` the archive
+would take 77 events while 11 stayed behind as evidence.
+
 ## Running as a server
 
 `pi-rt serve` answers messages as they arrive and runs a maintenance tick in the background.

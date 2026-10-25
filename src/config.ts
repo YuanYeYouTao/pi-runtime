@@ -59,6 +59,10 @@ export type RuntimeConfig = {
   batchTurns: number;
   /** Also distil when a thread has been idle this long, even below batchTurns. */
   idleMinutes: number;
+  /** How many compressed database snapshots to keep. */
+  backupKeep: number;
+  /** Archive conversation events older than this. */
+  archiveDays: number;
   /** Set false to disable automatic distillation (manual `distill` only). */
   autoExtract: boolean;
   /** Feishu app credentials; env wins over config.json. */
@@ -96,6 +100,8 @@ export function loadConfig(): RuntimeConfig {
     memoryEnabled: (process.env.PI_RT_MEMORY ?? String(raw.memory?.enabled ?? true)) !== "false",
     batchTurns: Number(process.env.PI_RT_BATCH_TURNS ?? raw.memory?.batchTurns ?? 10),
     idleMinutes: Number(process.env.PI_RT_IDLE_MINUTES ?? raw.memory?.idleMinutes ?? 15),
+    backupKeep: Number(process.env.PI_RT_BACKUP_KEEP ?? raw.limits?.backupKeep ?? 7),
+    archiveDays: Number(process.env.PI_RT_ARCHIVE_DAYS ?? raw.limits?.archiveDays ?? 30),
     autoExtract: (process.env.PI_RT_AUTO_EXTRACT ?? String(raw.memory?.autoExtract ?? true)) !== "false",
     feishu: {
       appId: process.env.FEISHU_APP_ID ?? raw.feishu?.appId,

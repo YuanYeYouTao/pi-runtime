@@ -145,6 +145,16 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 - [x] 端到端：两条 webhook 消息（低于 10 轮阈值）→ 下一 tick 自动提炼出 `trip_budget_cny`
 - [x] 副作用清理：测试线程的记忆已从开发库移除
 
+## Phase 2.10 — 归档与备份 ✅
+
+- [x] 归档：旧事件 → `data/archive/*.jsonl.gz` 后从主表删除
+  - 三条排除：未提炼的、被记忆引用为证据的、还在窗口内的
+  - 归档保留原始行，可逆
+- [x] 备份：`VACUUM INTO` 一致性快照 + gzip（WAL 下直接拷文件可能拿到撕裂状态）
+- [x] 保留策略：`--keep`（默认 7），serve 每 24 小时自动备份一次
+- [x] `pi-rt archive --list` 显示归档/备份清单与最新备份年龄
+- [x] 实测：库 0.49 MB → 备份 86.5 KB；`--days 0` 时 77 条可归档、11 条因证据保留
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）
