@@ -21,6 +21,7 @@ import { archiveConversationEvents, backupDatabase, inspectArchives, newestBacku
 import { normalizeMode, sandboxReport } from "./sandbox.ts";
 import { exportMemoryToGit } from "./memory-git.ts";
 import { summarizeToolCalls, listMcpServers, formatToolReport } from "./tools-report.ts";
+import { buildSpanTree, formatSpanTree } from "./trace.ts";
 import { describePolicy } from "./sandbox.ts";
 import { Gate } from "./gate.ts";
 import { buildDigest, buildSplitPrompt, canSpawn, parseSubtasks, runWithLimit } from "./subagent.ts";
@@ -67,6 +68,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts memory-git [--message "..."]   把记忆导出成可 diff 的 Git 仓库
   node src/cli.ts tree <task-id>                   查看任务与子 Agent 的派生树
   node src/cli.ts tools [--days 30] [--json]      工具调用审计（次数/成功率/耗时）+ MCP 清单
+  node src/cli.ts trace <task-id>                  看一次运行的分层耗时（compose/model/tool）
   node src/cli.ts ask "..." --spawn N              拆成 N 个子 Agent 并行执行后汇总
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
@@ -422,6 +424,26 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdTrace(args: string[]): number {
+  const id = args[0];
+  if (!id) {
+    console.error("usage: node src/cli.ts trace <task-id>");
+    return 2;
+  }
+  const store = new Store(DB_PATH);
+  try {
+    const rows = store.spansOf(id);
+    if (rows.length === 0) {
+      console.error(`该任务没有 span 记录（trace 是后加的，旧任务没有）`);
+      return 1;
+    }
+    for (const line of formatSpanTree(buildSpanTree(rows), { totalChars: 0 })) console.log(line);
+    return 0;
+  } finally {
+    store.close();
+  }
 }
 
 function cmdTools(args: string[]): number {
@@ -1219,6 +1241,8 @@ async function main(): Promise<number> {
       return cmdTree(rest);
     case "tools":
       return cmdTools(rest);
+    case "trace":
+      return cmdTrace(rest);
     case "backup":
       return cmdBackup(rest);
     case "resolve":

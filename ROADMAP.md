@@ -193,6 +193,14 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
   - 无变化不提交；历史不重写（可 diff / 可回滚）
 - [x] 修复：`git rev-parse` 会向上找到父仓库，曾把投影提交进主仓库 —— 改为只检查目录内 `.git`
 
+## Phase 3.6 — 运行链路（Tracing）✅
+
+- [x] `spans` 表：task → compose / model / tool，带 parent、起止时间、attrs
+- [x] worker 埋点：每次尝试一个根 span，compose / 模型调用 / 每次工具调用各一个子 span
+- [x] `pi-rt trace <task-id>`：按耗时排序打印树，✗ 标失败层
+- [x] 实测：`model 1254ms / compose 2ms`，cacheable 前缀 439 字符一并入 trace
+- [x] 失败也会关闭 span（status=error），不会留下悬挂的 running
+
 ## Phase 3.5 — 工具审计与 MCP 边界 ✅
 
 - [x] **修沙箱后门**：`readonly` 现在排除 `mcp__*`

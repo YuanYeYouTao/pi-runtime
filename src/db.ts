@@ -68,6 +68,23 @@ export class Store {
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, seq);");
 
     // v2 columns: tasks now belong to a conversation thread and track distillation.
+    // Span tree: one task produces a few nested spans (compose → model → tools). Kept in its
+    // own table rather than derived from events, because a span has a duration and a parent.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS spans (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id    TEXT NOT NULL,
+        parent_id  INTEGER,
+        kind       TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at   TEXT,
+        status     TEXT NOT NULL DEFAULT 'running',
+        attrs      TEXT
+      );
+    `);
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_spans_task ON spans(task_id, id);");
+
     this.ensureColumn("tasks", "thread", "TEXT NOT NULL DEFAULT 'default'");
     this.ensureColumn("tasks", "distilled_at", "TEXT");
     // Sub-agent lineage: which parent spawned this task, and its position in the batch.
@@ -373,6 +390,33 @@ export class Store {
       update.run(replacement, row.seq);
     }
     return { rows: rows.length, freedBytes: freed };
+  }
+
+  startSpan(taskId: string, kind: string, name: string, parentId: number | null = null, attrs?: unknown): number {
+    const result = this.db
+      .prepare("INSERT INTO spans (task_id, parent_id, kind, name, started_at, attrs) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(taskId, parentId, kind, name, now(), attrs === undefined ? null : JSON.stringify(attrs));
+    return Number(result.lastInsertRowid);
+  }
+
+  endSpan(id: number, status: "ok" | "error", attrs?: unknown): void {
+    this.db
+      .prepare("UPDATE spans SET ended_at = ?, status = ?, attrs = COALESCE(?, attrs) WHERE id = ?")
+      .run(now(), status, attrs === undefined ? null : JSON.stringify(attrs), id);
+  }
+
+  spansOf(taskId: string): Array<{
+    id: number;
+    task_id: string;
+    parent_id: number | null;
+    kind: string;
+    name: string;
+    started_at: string;
+    ended_at: string | null;
+    status: string;
+    attrs: string | null;
+  }> {
+    return this.db.prepare("SELECT * FROM spans WHERE task_id = ? ORDER BY id ASC").all(taskId) as any[];
   }
 
   /** Finished tasks that have not been fed to the memory extractor yet. */

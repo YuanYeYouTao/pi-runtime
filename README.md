@@ -451,6 +451,27 @@ t_mvo1i46i_wqb7x  done  191 字符  8s
 
 **拆分由模型完成，不按标点切** —— 边界应该跟着工作走，而不是跟着格式走。
 
+
+## 运行链路（Tracing）
+
+一次任务会产生一棵 span 树，落在 `spans` 表里，`pi-rt trace <task-id>` 打出来：
+
+```
+$ pi-rt trace t_mvo1ynmy_hfn4a
+• 1282ms  task/attempt 1  (chars=2, tokens=6062)
+  • 1254ms  model/deepseek-flash  (chars=551, tokens=6062)
+  •    2ms  compose/context  (chars=551, cacheable=439)
+```
+
+读法：**时长越大越靠上，✗ 表示该层失败，问题就在那一层往下找**。三层的含义：
+
+| 层 | 看什么 | 常见问题 |
+|---|---|---|
+| `compose` | 上下文组装耗时与字符数 | 组装慢说明去重/检索是瓶颈 |
+| `model` | 模型调用耗时、输入字符、token | 慢在这里，就优化上下文或换模型 |
+| `tool` | 每次工具调用的耗时与成败 | 工具失败率高，问题在工具或权限，不在模型 |
+
+这是 JD 里那句"从盯着日志猜测，变成打开链路即可定位"的最小实现。
 ## 工具审计与 MCP 边界
 
 `pi-rt tools` 把工具调用从事件日志里聚合出来：

@@ -162,6 +162,11 @@ async function runAttempt(
   let budgetTripped = false;
   let promptChars = 0;
 
+  // One root span per attempt, with compose / model / tool spans beneath it. This is what turns
+  // "read the log and guess" into "open the trace and see which layer was slow or failed".
+  const rootSpan = store.startSpan(task.id, "task", `attempt ${attempt}`);
+  const toolSpans = new Map<string, number>();
+
   rpc.on("record", (record: RpcRecord) => {
     // Only records that cannot be reconstructed are persisted; streaming deltas are dropped.
     const persisted = persistRecord(record, cfg.eventPayloadMax ?? 2000);
@@ -193,8 +198,20 @@ async function runAttempt(
     }
 
     if (TOOL_EVENT.test(record.type)) {
-      const name = record.toolName ?? record.name ?? record.type;
+      const name = String(record.toolName ?? record.name ?? record.type);
       hooks.onStatus?.(`tool → ${name}`);
+
+      const callId = String(record.toolCallId ?? record.id ?? "");
+      if (record.type === "tool_execution_start" && callId) {
+        toolSpans.set(callId, store.startSpan(task.id, "tool", name, rootSpan, { toolCallId: callId }));
+      }
+      if (record.type === "tool_execution_end" && callId) {
+        const spanId = toolSpans.get(callId);
+        if (spanId !== undefined) {
+          store.endSpan(spanId, record.isError === true || record.error ? "error" : "ok");
+          toolSpans.delete(callId);
+        }
+      }
     }
   });
 
@@ -322,11 +339,13 @@ async function runAttempt(
       calibration.close();
     }
 
+    const composeSpan = store.startSpan(task.id, "compose", "context", rootSpan);
     const { prompt: finalPrompt, manifest } = compose(segments, {
       budgetChars: cfg.contextBudgetChars,
       charsPerToken,
     });
     promptChars = finalPrompt.length;
+    store.endSpan(composeSpan, "ok", { chars: finalPrompt.length, cacheable: manifest.cacheableChars });
     store.appendEvent(task.id, "context_plan", manifest);
     if (manifest.conflicts.length > 0) {
       store.appendEvent(task.id, "context_conflict", { conflicts: manifest.conflicts });
@@ -342,7 +361,9 @@ async function runAttempt(
     rpc.start();
     hooks.onStatus?.(`pi pid=${(rpc as any).child?.pid ?? "?"} attempt=${attempt}`);
 
+    const modelSpan = store.startSpan(task.id, "model", String(cfg.model ?? "default"), rootSpan, { chars: finalPrompt.length });
     await rpc.prompt(finalPrompt, cfg.maxMinutes * 60_000 + 5_000);
+    store.endSpan(modelSpan, "ok", { chars: promptChars, tokens: usage?.total ?? 0 });
 
     if (lastError) throw new Error(lastError);
     if (!transcript.trim()) {
@@ -381,9 +402,11 @@ async function runAttempt(
     memory?.markUsed(injected.ids);
     store.finishTask(task.id, transcript.trim());
     store.addConversationEvent(task.thread, "agent", "assistant", transcript.trim(), task.id);
+    store.endSpan(rootSpan, "ok", { chars: transcript.length, tokens: usage?.total ?? 0 });
     return transcript.trim();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    store.endSpan(rootSpan, "error", { error: message.slice(0, 200) });
     const stderr = rpc.stderrTail.trim();
     throw new Error(stderr ? `${message}\n--- pi stderr ---\n${stderr.slice(-1500)}` : message);
   } finally {
