@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "note": "Ground truth authored by hand. keys are NOT compared: the extractor picks its own key, so matching is by category + content keywords. Transitions are judged on final DB state.",
+  "cases": [
+    {
+      "id": "c01_multi_fact",
+      "goal": "一句话里三个稳定事实，应原子化拆开",
+      "kind": "positive",
+      "turns": [
+        { "user": "我叫陈涛，在杭州做后端，主要用 Go 和 Postgres。", "assistant": "记下了。" }
+      ],
+      "expect": [
+        { "category": "fact", "contains": ["杭州"] },
+        { "contains": ["go"] },
+        { "contains": ["postgres"] }
+      ],
+      "allow_contains": ["陈涛", "后端"]
+    },
+    {
+      "id": "c02_pref_style",
+      "goal": "明确的回答风格偏好",
+      "kind": "positive",
+      "turns": [
+        { "user": "以后回答我别写那些客套话，先给结论，代码要能直接跑。", "assistant": "明白。" }
+      ],
+      "expect": [{ "category": "preference", "contains": ["结论"] }],
+      "allow_contains": ["代码"]
+    },
+    {
+      "id": "c03_pref_food",
+      "goal": "两个饮食偏好，应拆成两条",
+      "kind": "positive",
+      "turns": [{ "user": "我不吃香菜，咖啡只喝美式。", "assistant": "好的。" }],
+      "expect": [
+        { "category": "preference", "contains": ["香菜"] },
+        { "category": "preference", "contains": ["美式"] }
+      ],
+      "allow_contains": ["咖啡"]
+    },
+    {
+      "id": "c04_chitchat",
+      "goal": "寒暄，不该记",
+      "kind": "negative",
+      "turns": [{ "user": "早啊，今天天气不错。", "assistant": "早上好！" }],
+      "expect": []
+    },
+    {
+      "id": "c05_oneoff_query",
+      "goal": "一次性工具查询，不该记",
+      "kind": "negative",
+      "turns": [{ "user": "帮我看看现在几点？", "assistant": "现在是下午 3 点。" }],
+      "expect": []
+    },
+    {
+      "id": "c06_joke",
+      "goal": "玩笑话，不该记",
+      "kind": "negative",
+      "turns": [{ "user": "我要是中彩票了就辞职去南极养企鹅。", "assistant": "哈哈，那得先中奖。" }],
+      "expect": []
+    },
+    {
+      "id": "c07_uncertain",
+      "goal": "不确定的打算，不该记",
+      "kind": "negative",
+      "turns": [{ "user": "我可能在考虑明年要不要学 Rust，还没想好。", "assistant": "可以先试试小项目。" }],
+      "expect": []
+    },
+    {
+      "id": "c08_update_city",
+      "goal": "搬家：覆盖旧城市",
+      "kind": "transition",
+      "seed": [{ "key": "user_city", "category": "fact", "content": "用户住在杭州", "importance": 3 }],
+      "turns": [{ "user": "我上个月搬到深圳了，以后别再说杭州。", "assistant": "好的，已更新。" }],
+      "expect": [{ "category": "fact", "contains": ["深圳"], "action": "correct" }],
+      "state_check": { "key": "user_city", "must_be": "active_with", "contains": ["深圳"] }
+    },
+    {
+      "id": "c09_update_job",
+      "goal": "换工作：覆盖旧职业",
+      "kind": "transition",
+      "seed": [{ "key": "user_job", "category": "fact", "content": "用户在某创业公司做后端开发", "importance": 3 }],
+      "turns": [{ "user": "我换工作了，现在在字节做基础架构。", "assistant": "恭喜。" }],
+      "expect": [{ "category": "fact", "contains": ["字节"], "action": "correct" }],
+      "state_check": { "key": "user_job", "must_be": "active_with", "contains": ["字节"] }
+    },
+    {
+      "id": "c10_update_pref_reversal",
+      "goal": "偏好反转：美式 → 拿铁",
+      "kind": "transition",
+      "seed": [{ "key": "user_coffee", "category": "preference", "content": "咖啡只喝美式", "importance": 3 }],
+      "turns": [{ "user": "最近胃不好，改喝拿铁了。", "assistant": "记下了。" }],
+      "expect": [{ "category": "preference", "contains": ["拿铁"], "action": "correct" }],
+      "state_check": { "key": "user_coffee", "must_be": "active_with", "contains": ["拿铁"] }
+    },
+    {
+      "id": "c11_invalidate_pet",
+      "goal": "宠物离世：旧事实失效且无替代值",
+      "kind": "transition",
+      "seed": [{ "key": "user_pet", "category": "fact", "content": "养了一只叫豆豆的猫", "importance": 3 }],
+      "turns": [{ "user": "豆豆上个月走了，以后别再提了。", "assistant": "抱歉听到这个消息。" }],
+      "expect": [{ "contains": ["豆豆"] }],
+      "state_check": { "key": "user_pet", "must_be": "old_inactive", "absent": ["养了一只"] },
+      "allow_contains": ["豆豆", "提起"]
+    },
+    {
+      "id": "c12_invalidate_habit",
+      "goal": "习惯彻底终止：旧事实失效",
+      "kind": "transition",
+      "seed": [{ "key": "user_habit", "category": "preference", "content": "每天晨跑 5 公里", "importance": 3 }],
+      "turns": [{ "user": "膝盖伤得厉害，晨跑已经彻底停了，以后不用再提醒我跑步。", "assistant": "明白了。" }],
+      "expect": [{ "action": "invalidate" }],
+      "state_check": { "key": "user_habit", "must_be": "no_active" },
+      "allow_contains": ["膝盖"]
+    },
+    {
+      "id": "c13_event_quit",
+      "goal": "重大事件：离职，importance 应偏高",
+      "kind": "positive",
+      "turns": [{ "user": "我下个月 15 号离职，之后全职做自己的项目。", "assistant": "这是个大决定。" }],
+      "expect": [{ "category": "event", "contains": ["离职"], "importanceMin": 4 }],
+      "allow_contains": ["项目"]
+    },
+    {
+      "id": "c14_event_commitment",
+      "goal": "长期承诺：每周复盘",
+      "kind": "positive",
+      "turns": [{ "user": "我们约定每周五下午三点做复盘。", "assistant": "好，记在日程里。" }],
+      "expect": [{ "category": "event", "contains": ["复盘"] }]
+    },
+    {
+      "id": "c15_subject_other",
+      "goal": "信息属于他人：subject 不应是 user",
+      "kind": "positive",
+      "turns": [{ "user": "我女儿小满今年上小学一年级。", "assistant": "一年级啊，刚起步。" }],
+      "expect": [{ "category": "fact", "contains": ["一年级"], "subjectNotUser": true }],
+      "allow_contains": ["小满", "女儿"]
+    },
+    {
+      "id": "c16_evidence_numbers",
+      "goal": "具体数字必须原样落入证据与内容",
+      "kind": "positive",
+      "turns": [
+        { "user": "我那台闲置的服务器是 32 核 128G，装了两块 4090。", "assistant": "配置不错。" }
+      ],
+      "expect": [{ "category": "fact", "contains": ["32", "128"] }],
+      "allow_contains": ["4090", "服务器"]
+    },
+    {
+      "id": "c17_mixed_turn",
+      "goal": "同一轮里该记的记、该丢的丢",
+      "kind": "positive",
+      "turns": [
+        { "user": "今天累死了……对了，我以后一律用 pnpm，别再用 npm 了。", "assistant": "好，换成 pnpm。" }
+      ],
+      "expect": [{ "category": "preference", "contains": ["pnpm"] }],
+      "forbid_contains": ["累"]
+    },
+    {
+      "id": "c18_update_stack",
+      "goal": "工具链替换：npm → pnpm",
+      "kind": "transition",
+      "seed": [{ "key": "user_pkg_manager", "category": "fact", "content": "用 npm 管理依赖", "importance": 3 }],
+      "turns": [{ "user": "项目已经全面换成 pnpm 了，npm-lock 都删了。", "assistant": "收到。" }],
+      "expect": [{ "category": "fact", "contains": ["pnpm"], "action": "correct" }],
+      "state_check": { "key": "user_pkg_manager", "must_be": "active_with", "contains": ["pnpm"] }
+    },
+    {
+      "id": "c19_negative_calc",
+      "goal": "一次性计算，不该记",
+      "kind": "negative",
+      "turns": [{ "user": "帮我算下 1 到 100 的和。", "assistant": "5050。" }],
+      "expect": []
+    },
+    {
+      "id": "c20_negative_venting",
+      "goal": "情绪宣泄，不该记",
+      "kind": "negative",
+      "turns": [{ "user": "烦死了，今天被产品经理气到不行。", "assistant": "理解，先缓一缓。" }],
+      "expect": []
+    },
+    {
+      "id": "c21_target_member",
+      "goal": "转述他人：主体必须是张三，不是发言人",
+      "kind": "positive",
+      "turns": [{ "user": "张三说他下周去上海出差，要待三天。", "assistant": "知道了。" }],
+      "expect": [{ "category": "event", "contains": ["上海"], "targetSubject": "member:张三" }],
+      "allow_contains": ["出差"]
+    },
+    {
+      "id": "c22_target_group",
+      "goal": "针对全群的约定：主体应是 group",
+      "kind": "positive",
+      "turns": [{ "user": "以后每周五下午全群一起做复盘，这条当规矩。", "assistant": "好。" }],
+      "expect": [{ "contains": ["复盘"], "targetSubject": "group" }]
+    },
+    {
+      "id": "c23_contest",
+      "goal": "两处信息冲突且无法判断：应判 contest",
+      "kind": "transition",
+      "seed": [{ "key": "user_birth_city", "category": "fact", "content": "用户出生在南京", "importance": 3 }],
+      "turns": [
+        { "user": "我户口本上写的出生地是苏州，但我妈一直说是南京。", "assistant": "那可能以户口本为准。" }
+      ],
+      "expect": [{ "action": "contest" }],
+      "state_check": { "key": "user_birth_city", "must_be": "contested" }
+    },
+    {
+      "id": "c24_assistant_only",
+      "goal": "只在助手话里出现的信息不该成为用户记忆",
+      "kind": "negative",
+      "turns": [{ "user": "今天天气怎么样？", "assistant": "今天晴，气温 25 度，适合出门。" }],
+      "expect": []
+    },
+    {
+      "id": "c25_correct_editor",
+      "goal": "更换编辑器：correct 到既有槽位",
+      "kind": "transition",
+      "seed": [{ "key": "user_editor", "category": "fact", "content": "用 VS Code 写代码", "importance": 3 }],
+      "turns": [{ "user": "我已经换成 Cursor 了，VS Code 卸掉了。", "assistant": "好。" }],
+      "expect": [{ "contains": ["cursor"], "action": "correct" }],
+      "state_check": { "key": "user_editor", "must_be": "active_with", "contains": ["cursor"] }
+    },
+    {
+      "id": "c26_mixed_subjects",
+      "goal": "一句话两个人：各自归属不同主体",
+      "kind": "positive",
+      "turns": [{ "user": "我老婆不吃辣，但我很能吃辣。", "assistant": "记下了。" }],
+      "expect": [
+        { "category": "preference", "contains": ["不吃辣"], "subjectNotUser": true },
+        { "category": "preference", "contains": ["能吃辣"], "targetSubject": "user" }
+      ],
+      "allow_contains": ["辣"]
+    },
+    {
+      "id": "c27_group_speakers",
+      "goal": "群聊三人各说各自的事：三条记忆必须分别归属三个发言者",
+      "kind": "positive",
+      "turns": [
+        { "speaker": "张三", "user": "我常驻上海，做芯片验证。", "assistant": "好的。" },
+        { "speaker": "李四", "user": "我不吃香菜，点菜的时候注意下。", "assistant": "记下了。" },
+        { "speaker": "王五", "user": "我对花生过敏，比较严重。", "assistant": "明白，会避开。" }
+      ],
+      "expect": [
+        { "contains": ["上海"], "targetSubject": "member:张三" },
+        { "contains": ["香菜"], "targetSubject": "member:李四" },
+        { "contains": ["花生"], "targetSubject": "member:王五" }
+      ],
+      "allow_contains": ["芯片", "过敏"]
+    },
+    {
+      "id": "c28_cross_attribution",
+      "goal": "张三替李四转述：主体必须是李四",
+      "kind": "positive",
+      "turns": [
+        { "speaker": "张三", "user": "李四说他最近戒辣了，一点辣都不吃。", "assistant": "知道了。" },
+        { "speaker": "李四", "user": "对我确实戒了。", "assistant": "好。" }
+      ],
+      "expect": [{ "contains": ["辣"], "targetSubject": "member:李四" }],
+      "allow_contains": ["戒"]
+    }
+  ]
+}

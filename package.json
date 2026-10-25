@@ -1,0 +1,20 @@
+{
+  "name": "pi-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal agent runtime built on the pi coding agent (RPC mode).",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "doctor": "node src/cli.ts doctor",
+    "ask": "node src/cli.ts ask",
+    "worker": "node src/cli.ts worker",
+    "list": "node src/cli.ts list"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@larksuiteoapi/node-sdk": "^1.76.0"
+  }
+}

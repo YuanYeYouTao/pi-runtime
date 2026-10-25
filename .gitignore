@@ -1,0 +1,7 @@
+node_modules/
+.npm-cache/
+data/
+config.json
+*.log
+eval/tmp/
+.DS_Store

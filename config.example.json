@@ -1,0 +1,10 @@
+{
+  "ownerName": "YourName",
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "maxMinutes": 30,
+  "memory": {
+    "enabled": true,
+    "budgetChars": 1800
+  }
+}

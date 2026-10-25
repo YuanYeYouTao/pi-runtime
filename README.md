@@ -1,0 +1,281 @@
+# pi-runtime
+
+A personal agent runtime built on top of the **pi** coding agent (`@earendil-works/pi-coding-agent`), the same way a platform team would wrap an agent kernel.
+
+The point of this project is not "chat with an AI on my laptop". It is to own the three things a chat wrapper does not have:
+
+1. **State** — every task, every event, every result survives a crash.
+2. **A boundary** — the executor is a disposable subprocess with no database and no port.
+3. **A seam** — the agent kernel is swappable, so the platform logic stays ours.
+
+## Architecture
+
+```
+        you (CLI today, web / IM later)
+                    │
+                    ▼
+        ┌───────────────────────────┐
+        │  orchestrator (this repo) │  ← the only stateful part
+        │  tasks · events · queue   │
+        │  SQLite (data/runtime.db) │
+        └───────────┬───────────────┘
+                    │ stdin JSONL  ▲ stdout JSONL
+                    ▼              │
+        ┌───────────────────────────┐
+        │  pi --mode rpc            │  ← stateless, no db, no port
+        │  prompt · tools · stream  │
+        └───────────┬───────────────┘
+                    │
+                    ▼
+        ┌───────────────────────────┐
+        │  workspace (files on disk)│  ← the real side effects
+        └───────────────────────────┘
+```
+
+Why the split matters: the executor can be killed, restarted, containerized or swapped for another agent, and the queue keeps its place. This is the same decision the systems we studied make (backend = only stateful hub, runner = no database / no port).
+
+## Quick start
+
+```bash
+# 1. deps (--ignore-scripts: pi needs no lifecycle scripts, and sandboxes often block them)
+npm install --ignore-scripts
+
+# 2. bind a model (writes credentials to data/pi, NOT ~/.pi)
+node src/cli.ts login
+
+# 3. check the pipe
+node src/cli.ts doctor
+
+# 4. run a task in the current folder
+node src/cli.ts ask "summarize what this repository does" --cwd .
+
+# 5. or run a daemon that drains the queue
+node src/cli.ts worker
+```
+
+Then, from another terminal, enqueue work without running it inline:
+
+```bash
+node -e "import('./src/db.ts').then(({Store})=>{const s=new Store('data/runtime.db');console.log(s.createTask('list the TODO comments','.'))})"
+node src/cli.ts worker --once
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `doctor` | handshake with pi, print session id / model / compaction state |
+| `login` | run pi's `/login` against the isolated config dir |
+| `ask "<prompt>"` | enqueue + run one task now, stream the output |
+| `worker [--once]` | daemon: claim queued tasks one at a time, crash-safe |
+| `list [n]` | recent tasks with status |
+| `show <id>` | one task, its result and its event trail |
+| `remember "<text>" --key <slot> [--category …] [--importance 1-5] [--evidence "…"]` | write a memory by hand |
+| `memories [category] [--all]` | list memories (active by default) |
+| `history <key>` | the full supersede / invalidate chain for one slot |
+| `forget <id>` | hard-delete one row |
+| `distill [--thread t] [--limit n]` | batch-extract memories from undistilled turns |
+| `stats` | task + memory counters |
+| `ask "…" --thread <t>` | keep turns in a conversation thread |
+
+## Memory
+
+Three layers: **evidence → target → verdict**.
+
+| category | for |
+|---|---|
+| `preference` | 长期稳定的个人偏好（饮食、作息、称呼、回答风格…） |
+| `fact` | 长期稳定的客观事实（工作、技术栈、设备、常住地…） |
+| `event` | 重要的单次事件与长期承诺（离职、复盘约定…） |
+
+### Layer 1 — every memory is bound to a numbered event
+
+Conversation is stored append-only in `conversation_events` (`#1024 | user_1 | role | text`). The extractor never sees a plain transcript; it sees numbered lines, and must return:
+
+```json
+{ "evidence_event_id": 1024, "evidence_quote": "我平时只喝美式，不加糖" }
+```
+
+The quote is checked as a normalized substring of **that specific event**, not of the whole transcript. A quote that belongs to a neighbouring message is rejected — which is what stops a plausible-sounding memory from attaching to the wrong sentence.
+
+### Layer 2 — structured targets, no pronouns
+
+```json
+"target": { "type": "current_speaker" }
+"target": { "type": "named_member", "name": "张三" }
+"target": { "type": "current_group" }
+"target": { "type": "self" }
+```
+
+`named_member` requires a name. The prompt states the attribution rule explicitly ("张三说李四不吃辣" → 李四) and forbids 他/她/用户. Storage keeps `target_type` + `target_name`, and derives `subject` (`Rick` / `member:张三` / `group` / `agent`) for keys, injection and filtering.
+
+### Owner
+
+`ownerName` in `config.json` (default **Rick**, override with `PI_RT_OWNER`) is the canonical subject for `current_speaker`. Two consequences:
+
+- Existing `subject = "user"` rows are rewritten to the owner name on startup, so the rename is a migration, not a display tweak.
+- Ownership is **configured at ingest, never inferred**. The first implementation promoted "whoever spoke first" to owner, which meant renaming the owner renamed that group member — and silently made 张三 the owner of an agent belonging to Rick. `ensureOwner()` now matches by name and no longer demotes other identities.
+
+One person, several channels, one subject:
+
+- `PI_RT_OWNER_IDS` (or `ownerIds` in config) lists channel ids that also belong to the owner, for when the profile name is not "Rick" (a Feishu contact name, a Telegram handle).
+- `members.is_owner` therefore means "this identity belongs to the owner", and several rows may carry it.
+- Distillation collapses every owner identity into one subject: a message from Rick's Feishu account is stored as `subject = Rick`, not `member:陈涛`. Without this, the same person gets two memory slots and the agent forgets half of what it knows.
+
+### Layer 3 — four verdicts, decided against DB state
+
+| action | meaning | requires |
+|---|---|---|
+| `create` | new slot | — |
+| `correct` | value replaced (搬家/换工作/改偏好) | `target_fact_id` |
+| `invalidate` | retracted, no replacement | `target_fact_id` |
+| `contest` | conflicting, cannot decide which is true | `target_fact_id` |
+
+The extractor is handed the current state (`[ID: 42 | key: … | state: active]`), so it can point at a specific row. The DB then verifies that row exists and is active, and may still overrule the proposal:
+
+- `create` on an existing key → `correct` on that row
+- `create` near-duplicate (≥ 0.82 bigram-Jaccard) → `correct`, adopting the existing key
+- `correct` without a usable target → `create`
+- `invalidate` / `contest` without a usable target → rejected
+
+Only one `active` row per key (partial unique index). History is status-tagged (`superseded` / `invalidated` / `contested`) and never deleted.
+
+**Contested rows are not injected.** A fact under dispute is not a fact; feeding it to the agent as truth is worse than saying nothing. Adjudicate with `pi-rt resolve <key> <keep-id>`.
+
+### Batched, not per-message
+
+- **Threshold.** After `batchTurns` (default 10) undistilled turns, `ask` distils at the end of the run.
+- **Idle.** `worker` distils threads whose newest undistilled event is older than `idleMinutes` (default 15).
+- **Retryable.** Unparseable output does not mark events distilled, so the next batch retries them.
+
+### Injection
+
+Active rows only, ranked by `importance` then recency, cut at 1800 chars, injected at **run time** so a queued task sees memory as it is when it actually runs.
+
+```bash
+node src/cli.ts events main                                   # numbered evidence
+node src/cli.ts remember "默认使用 bash" --key user_shell --category fact --target self --event 12
+node src/cli.ts distill --thread main
+node src/cli.ts history user_shell                            # full verdict chain
+node src/cli.ts resolve user_birth_city 7                     # settle a contested slot
+```
+
+## Channels
+
+One ingest path, several transports. A message becomes a numbered event **before** any model call, so evidence survives a failed reply.
+
+```
+chat message → Members (identity) → conversation_event (#id) → task → pi → reply → event again
+```
+
+| transport | status | notes |
+|---|---|---|
+| `feed` (local) | working | `--as <name>` simulates a speaker; used for tests and demos |
+| `telegram` | working | long polling, no public URL; needs `TELEGRAM_BOT_TOKEN` |
+| `feishu` | working | long connection (no public URL); needs `FEISHU_APP_ID` / `FEISHU_APP_SECRET` |
+| others | seam only | plug into `ingest()` — see `src/gateway.ts` |
+
+```bash
+node src/cli.ts feed "我不吃香菜" --as 李四 --chat g1        # ingest as a specific speaker
+node src/cli.ts feed "我在上海做芯片验证" --as 张三 --chat g1 --run   # ingest + let pi reply
+node src/cli.ts members                                     # identity table
+TELEGRAM_BOT_TOKEN=... node src/cli.ts serve --channel telegram
+FEISHU_APP_ID=... FEISHU_APP_SECRET=... node src/cli.ts serve --channel feishu
+```
+
+### Feishu setup
+
+1. [open.feishu.cn](https://open.feishu.cn) → 开发者后台 → 创建**企业自建应用**
+2. 添加应用能力 → **机器人**
+3. 权限：`im:message`（接收）、`im:message:send_as_bot`（发送）；想要真实姓名再加 `contact:user.base:readonly`（不加则用 open_id 当名字）
+4. 事件与回调 → 订阅方式选 **使用长连接接收事件** → 添加事件 `im.message.receive_v1`
+5. 创建版本并发布，管理员审核通过
+6. 把机器人加进目标群，然后：
+
+```bat
+set FEISHU_APP_ID=cli_xxx
+set FEISHU_APP_SECRET=xxx
+pi-rt.cmd serve --channel feishu
+```
+
+Long connection is chosen on purpose: the agent runs behind NAT, so a webhook would need a tunnel. The cost is that the console must be set to long-connection mode — a webhook deployment would replace `serve()` with an HTTP handler and reuse `parseFeishuMessage()`.
+
+Limits today: only `text` messages are ingested (rich text `post`, images, files are skipped rather than mis-parsed); mentions are stripped (`@_user_1`); display names fall back to `open_id` without the contact scope.
+
+### Idempotency
+
+IM platforms redeliver when an ack is slow. `claimMessage(channel, message_id)` records the transport id before the event is created, so a redelivered message is dropped instead of producing a second event — and therefore a second memory. Covered by `tests/channels.test.mjs`.
+
+```bash
+node tests/channels.test.mjs    # 9 checks: parsing, mentions, post/empty/broken payloads, dedupe
+```
+
+Why polling for Telegram: a personal agent lives behind NAT on a laptop, so a webhook would need a tunnel — one more moving part for no benefit. The update cursor is in memory, so a restart re-delivers at most one message.
+
+Identity matters because `current_speaker` is relative to the event. Without `Members`, two people's facts collapse into one `user` slot; with it, each row carries `member:张三` or `member:李四`, and the extractor is told who is speaking in each line.
+
+## Evaluation
+
+Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.
+
+```bash
+node src/cli.ts eval            # writes eval/latest.json + eval/report-<ts>.md
+node src/cli.ts eval --only c08 # one case
+node src/cli.ts eval --keep     # keep per-case temp databases
+```
+
+| metric | v2 baseline (20) | v3 (26) | v3 + channels (28) |
+|---|---|---|---|
+| precision | 78.9% | 100% | **100%** (27/27) |
+| recall | 88.2% | 100% | **100%** (27/27) |
+| F1 | 83.3% | 100% | **100%** |
+| 负例泄漏 | 0/6 | 0/7 | **0/7** |
+| 状态迁移正确 | 5/6 | 8/8 | **8/8** |
+| 类别一致率（软指标） | — | — | **100%** (16/16) |
+| 用例通过 | 16/20 | 26/26 | **28/28** |
+
+The v3+ cases exercise the new layers specifically: cross-speaker attribution (`c21`), group-scoped commitments (`c22`), unresolvable conflict → `contest` (`c23`), assistant-only claims must not become user memory (`c24`), explicit `correct` with `target_fact_id` (`c25`), two subjects in one sentence (`c26`), a three-person group (`c27`), and quoting a third party (`c28`).
+
+**The most useful finding was about the benchmark, not the system.** Consecutive runs of the same 28 cases produced 27/28, then 26/28, then 28/28 twice — and nearly every "failure" turned out to be a judge decision: asserting a category the model legitimately disagreed with (`主要用 Go` as preference vs fact), demanding `invalidate` when a corrective event deactivated the old fact just as well, or requiring a person's name inside content whose target was already verified. Consequences baked in:
+
+- **Category is a soft metric**, reported as agreement, never a pass/fail gate — it is a judgement call and the least stable field.
+- **Deactivation is judged by state**: "the retracted phrase is no longer active", not "the slot is empty".
+- **`allow_contains`** tolerates legitimate extras the case did not enumerate.
+
+So the 100% says the system fits this benchmark. It does not say the benchmark is hard. These 28 cases have been used across six iterations of prompt and judge tuning, so a held-out set run once on the next version is the only way to make the number quotable.
+
+What the whole sequence exposed, in order:
+
+1. **Truncated JSON** lost a whole batch → the parser salvages complete objects before the cut.
+2. **`invalidate` vs `correct`** — an "已停止" row left a ghost active memory → the prompt now draws the boundary explicitly.
+3. **Ground truth was too narrow** — legitimate extras (job, name, knee injury) scored as false positives → cases declare `allow_contains`.
+4. **Judge too strict on deactivation** — a corrective event ("the cat died") deactivates the old fact just as well as `invalidate` does → state check asserts *the retracted phrase is no longer active*, not *the slot is empty*.
+5. **Category as a gate was the noisiest criterion** — `主要用 Go` as preference vs fact, an event vs a preference for a weekly review → category became a soft metric.
+
+Only items 1 and 2 were system defects; 3–5 were defects in the measurement. That ratio is the real lesson: an eval that keeps failing is usually telling you about its own criteria.
+
+## Design decisions
+
+- **RPC, not SDK.** The SDK embeds pi in-process (fast, but one crash kills the queue and the agent shares our memory). RPC keeps a hard process boundary and is language-agnostic — the same seam an IM gateway or a containerized runner would need. `stdio: inherit` is used for interactive login only.
+- **JSONL framing by hand.** pi's protocol is one JSON object per LF. `readline` is wrong here: it also splits on `U+2028`/`U+2029`, which are legal inside JSON strings.
+- **Wait for `agent_settled`, not `agent_end`.** `agent_end` closes one low-level run; retries, compaction and queued work can still follow. Only `agent_settled` means "it will not continue on its own".
+- **Our database, not pi's sessions.** The runtime runs pi with `--no-session`. Durability belongs to the orchestrator, so we can add retries, resume, audits and multi-channel delivery without reading pi's internal format. (Once task replay needs full transcripts, switch to storing pi session files and re-attach them.)
+- **Isolated config dir.** `PI_CODING_AGENT_DIR=data/pi` keeps the runtime's credentials and settings away from the user's global `~/.pi/agent`.
+- **`--no-approve`.** A daemon cannot answer a trust prompt, so project resources are declined by default. Sandboxing and approval are separate concerns; see the roadmap.
+
+## Status
+
+Working:
+
+- queue → spawn → stream/error → persist → stale-task reaping
+- `doctor` handshake with a real session id
+- **memory v3**: numbered events, per-event evidence binding, structured targets (`current_speaker` / `named_member` / `current_group` / `self`), four verdicts (`create` / `correct` / `invalidate` / `contest`), contested rows excluded from injection, batched distillation (threshold + idle), full audit chain
+- **owner**: `Rick`, configured via `config.json`, canonical subject for the owner's memories
+- **channels**: local `feed` (simulated speakers), Telegram long polling, Feishu long connection, identity table
+- benchmark: 28 cases, two consecutive 28/28 runs on `deepseek-flash` — in-sample, see the caveat above
+
+Verified end to end on a simulated three-person group: three speakers → three identities → each memory bound to `member:张三` / `member:李四` / `member:王五` with the right evidence event id and verbatim quote.
+
+Known gaps: no retry/backoff on task failure, single-threaded worker, no archival for the event/observability tables, Telegram path untested against the live API (no token yet), **Feishu path untested against the live API (no app credentials)**, no held-out benchmark, and the `correct` vs `invalidate` verdict is still unstable for "the habit stopped entirely" (observed both behaviours across runs).
+
+Next phases: see [ROADMAP.md](ROADMAP.md).
