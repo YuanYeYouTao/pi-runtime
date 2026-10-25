@@ -8,7 +8,9 @@
 FROM node:24-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# --ignore-scripts: nothing here needs a native build step, and skipping postinstall keeps the
+# image reproducible (verified locally: pi's CLI and the Lark SDK both land with this flag).
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 FROM node:24-bookworm-slim
 # git/curl are for the agent's own tools when sandbox mode is `full`; harmless otherwise.

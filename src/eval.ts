@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import path from "node:path";
-import { ROOT, loadConfig } from "./config.ts";
+import { DATA_DIR, ROOT, loadConfig } from "./config.ts";
 import { Store } from "./db.ts";
 import { MemoryStore } from "./memory.ts";
 import type { MemoryCategory } from "./memory.ts";
@@ -155,7 +155,8 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
   const file = JSON.parse(readFileSync(casesPath, "utf8")) as { cases: EvalCase[] };
   const cases = options.only ? file.cases.filter((item) => item.id.includes(options.only!)) : file.cases;
   const cfg = loadConfig();
-  const tmpRoot = path.join(ROOT, "eval", "tmp");
+  // Kept inside the data directory so a read-only image root still works (see deploy/).
+  const tmpRoot = path.join(DATA_DIR, "eval-tmp");
   mkdirSync(tmpRoot, { recursive: true });
 
   const outcomes: CaseOutcome[] = [];
