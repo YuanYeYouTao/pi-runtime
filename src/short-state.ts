@@ -135,7 +135,7 @@ export class ShortStateStore {
       .prepare(
         `SELECT * FROM short_state
           WHERE key = ? AND scope IN (?, 'global') AND status = 'active' AND expires_at > ?
-          ORDER BY scope = ? DESC, updated_at DESC LIMIT 1`,
+          ORDER BY scope = ? DESC, updated_at DESC, rowid DESC LIMIT 1`,
       )
       .get(key, scope, ts, scope) as ShortStateRow | undefined;
   }
@@ -146,7 +146,7 @@ export class ShortStateStore {
       .prepare(
         `SELECT * FROM short_state
           WHERE scope IN (?, 'global') AND status = 'active' AND expires_at > ?
-          ORDER BY updated_at DESC LIMIT ?`,
+          ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
       )
       .all(scope, ts, limit) as ShortStateRow[];
   }
