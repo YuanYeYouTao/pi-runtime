@@ -104,7 +104,13 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 - [x] `src/compose.ts` 纯函数：按段渲染 + 输出 manifest
 - [x] **零行为变化**：重构前后 prompt 逐字 diff，485 字符完全一致
 - [x] `context_plan` 事件：每段的字符数、meta、skipped、token 估算
-- [ ] P2 段预算 / 淘汰顺序 / 跨段去重 · P3 冲突裁决 / token 校准 · P4 检索段
+- [x] **P2 段预算 / 淘汰顺序 / 跨段去重**
+  - floor/cap 表：window 保底 1200，memory 顶 900，retrieved 最先淘汰，当前消息与指令永不截断
+  - 淘汰顺序：retrieved → short_state → memory → summary → window
+  - 跨段去重：window > short_state > memory > summary，比较前剥掉 `- [事实·4]` / `[Rick]` 前缀
+  - manifest 增加 floor/cap/truncated/droppedChars/evictions/dedup/overBudget
+  - 实盘：记忆里与短状态重复的一行被丢（similarity 0.73），311→258 字符
+- [ ] P3 冲突裁决 / token 校准 · P4 检索段
 
 > "它为什么答错了？" —— 看 `context_plan`。
 

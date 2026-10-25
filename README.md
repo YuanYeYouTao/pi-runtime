@@ -524,8 +524,42 @@ Every run records `context_plan`:
              {"kind":"current","chars":17}],"skipped":[]}
 ```
 
-The full plan (budgets, dedupe, conflict resolution, evals) is in
-[docs/context-composition.md](docs/context-composition.md); only P1 is implemented so far.
+### Budgets, eviction and dedupe (P2)
+
+Each segment has a floor and a cap, and the prompt now respects a total budget:
+
+| segment | floor | cap | what gets dropped first |
+|---|---|---|---|
+| instructions | — | — | never |
+| memory | 150 | 900 | lowest-priority lines (trailing) |
+| short state | 0 | 300 | trailing lines |
+| summary | 0 | 1000 | trailing sections |
+| window | **1200** | 2800 | **oldest** lines (newest always kept) |
+| retrieved | 0 | 800 | first to be evicted |
+| current message | — | — | never |
+
+Eviction order when the budget is tight: `retrieved → short state → memory → summary → window`.
+The window keeps a hard floor, so a long memory cannot push the recent conversation out.
+
+**Cross-segment dedupe** runs before allocation: a line that already appears in a
+higher-priority segment is dropped from the lower one (`window > short state > memory >
+summary`). Presentation prefixes are stripped first (`- [事实·4] …`, `[Rick] …`) — without that,
+similarity ends up measuring formatting instead of content.
+
+Live proof from a real run:
+
+```json
+"dedup": [{"kind":"memory","dropped":"runtime 状态存 SQLite 而非 Postgres…",
+           "keptIn":"higher-priority segment","similarity":0.73}]
+```
+
+memory went from 311 to 258 chars, and the prompt stayed identical otherwise.
+
+The manifest reports per-segment `floor`/`cap`/`truncated`/`droppedChars`, plus
+`evictions[]`, `dedup[]` and `overBudget`. `context_plan` records all of it.
+
+Remaining from [docs/context-composition.md](docs/context-composition.md): P3 (conflict
+resolution, token calibration) and P4 (retrieval segment).
 
 ## Evaluation
 
