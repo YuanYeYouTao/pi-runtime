@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-25T04:48:29.795Z",
+  "generatedAt": "2026-10-25T07:16:08.310Z",
   "model": "deepseek-flash",
   "cases": [
     {
@@ -16,7 +16,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 4357,
+      "ms": 3796,
       "pass": true
     },
     {
@@ -24,7 +24,7 @@
       "kind": "positive",
       "goal": "明确的回答风格偏好",
       "expected": 1,
-      "extracted": 1,
+      "extracted": 2,
       "truePositives": 1,
       "falsePositives": 0,
       "missed": 0,
@@ -33,7 +33,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2803,
+      "ms": 3472,
       "pass": true
     },
     {
@@ -50,7 +50,7 @@
       "categoryTotal": 2,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2843,
+      "ms": 3493,
       "pass": true
     },
     {
@@ -67,7 +67,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1193,
+      "ms": 1395,
       "pass": true
     },
     {
@@ -84,7 +84,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1318,
+      "ms": 1585,
       "pass": true
     },
     {
@@ -101,7 +101,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1388,
+      "ms": 1985,
       "pass": true
     },
     {
@@ -118,7 +118,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1488,
+      "ms": 1645,
       "pass": true
     },
     {
@@ -135,7 +135,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 2229,
+      "ms": 2644,
       "pass": true
     },
     {
@@ -152,7 +152,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 2268,
+      "ms": 3265,
       "pass": true
     },
     {
@@ -169,7 +169,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 4524,
+      "ms": 3666,
       "pass": true
     },
     {
@@ -186,7 +186,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 30429,
+      "ms": 7221,
       "pass": true
     },
     {
@@ -195,16 +195,16 @@
       "goal": "习惯彻底终止：旧事实失效",
       "expected": 1,
       "extracted": 2,
-      "truePositives": 0,
+      "truePositives": 1,
       "falsePositives": 0,
-      "missed": 1,
+      "missed": 0,
       "rejected": 0,
       "categoryOk": 0,
       "categoryTotal": 0,
       "fpDetail": [],
-      "stateCheck": false,
-      "ms": 10252,
-      "pass": false
+      "stateCheck": true,
+      "ms": 6161,
+      "pass": true
     },
     {
       "id": "c13_event_quit",
@@ -220,7 +220,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 3005,
+      "ms": 4424,
       "pass": true
     },
     {
@@ -233,11 +233,11 @@
       "falsePositives": 0,
       "missed": 0,
       "rejected": 0,
-      "categoryOk": 0,
+      "categoryOk": 1,
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2657,
+      "ms": 4628,
       "pass": true
     },
     {
@@ -254,7 +254,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 3339,
+      "ms": 4065,
       "pass": true
     },
     {
@@ -271,7 +271,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2599,
+      "ms": 4148,
       "pass": true
     },
     {
@@ -288,7 +288,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2073,
+      "ms": 2049,
       "pass": true
     },
     {
@@ -305,7 +305,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 1882,
+      "ms": 2826,
       "pass": true
     },
     {
@@ -322,7 +322,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1490,
+      "ms": 1254,
       "pass": true
     },
     {
@@ -339,7 +339,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1440,
+      "ms": 2045,
       "pass": true
     },
     {
@@ -356,7 +356,7 @@
       "categoryTotal": 1,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 3239,
+      "ms": 5845,
       "pass": true
     },
     {
@@ -373,7 +373,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2445,
+      "ms": 2817,
       "pass": true
     },
     {
@@ -390,7 +390,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 3474,
+      "ms": 4205,
       "pass": true
     },
     {
@@ -407,7 +407,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 1168,
+      "ms": 3016,
       "pass": true
     },
     {
@@ -424,7 +424,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": true,
-      "ms": 2284,
+      "ms": 5769,
       "pass": true
     },
     {
@@ -441,7 +441,7 @@
       "categoryTotal": 2,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 3168,
+      "ms": 5273,
       "pass": true
     },
     {
@@ -458,7 +458,7 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 2209,
+      "ms": 4103,
       "pass": true
     },
     {
@@ -475,26 +475,26 @@
       "categoryTotal": 0,
       "fpDetail": [],
       "stateCheck": null,
-      "ms": 3584,
+      "ms": 5662,
       "pass": true
     }
   ],
   "metrics": {
     "expected": 27,
-    "extracted": 31,
-    "truePositives": 26,
+    "extracted": 32,
+    "truePositives": 27,
     "falsePositives": 0,
-    "missed": 1,
+    "missed": 0,
     "rejected": 0,
     "precision": 1,
-    "recall": 0.9629629629629629,
-    "f1": 0.9811320754716981,
+    "recall": 1,
+    "f1": 1,
     "negativeCases": 7,
     "negativeLeaks": 0,
     "transitionCases": 8,
-    "transitionStateOk": 7,
-    "categoryAgreement": 0.9375,
+    "transitionStateOk": 8,
+    "categoryAgreement": 1,
     "evidenceRejectionRate": 0,
-    "passRate": 0.9642857142857143
+    "passRate": 1
   }
 }

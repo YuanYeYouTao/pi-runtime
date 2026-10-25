@@ -57,6 +57,7 @@ target 只有四种：
 - invalidate：用户明确表示以前的说法不作数/是玩笑/已彻底不再成立，且没有新值可替代。必须填 target_fact_id。
 - contest：两处信息冲突，无法判断哪方正确。必须填 target_fact_id（与之冲突的那条），把两条都标为争议。
 不要为了凑数而 correct：内容没有实质变化就不要输出。
+注意：已有记忆里 subject/target 不同的条目**不算重复**。不同的人可以有相同偏好（两人都不吃香菜 = 两条记忆），不要因为"这条已经有了"就跳过对另一个人的提取。
 
 # 输出格式
 只输出 JSON 数组，不要解释、不要 markdown 代码块。没有长期价值信息就输出 []：
@@ -115,7 +116,10 @@ export async function distillBatch(
   if (events.length === 0) return { events: 0, applied: [], rejected: [], raw: "" };
 
   const transcript = buildTranscript(events, 14_000);
-  const existing = memory.stateBrief();
+  // Reference state is scoped to the same conversation, so a chat batch is not compared
+  // against project memories (which would suppress or wrongly "correct" them).
+  const thread = events[0]?.thread ?? null;
+  const existing = memory.stateBrief(3_000, thread);
   const speakers = [...new Set(events.filter((event) => event.role === "user").map((event) => event.speaker))];
   const chatType = speakers.length > 1 ? "群聊" : "私聊";
   const prompt = [
@@ -170,11 +174,14 @@ export async function distillBatch(
   // The owner may appear under several display names (Feishu profile name, Telegram handle).
   // All of them must collapse into one subject, or the same person gets two memory slots.
   const ownerSet = new Set([cfg.ownerName, ...ownerNames].filter(Boolean));
+  // Only ids that were actually shown may be acted on: a model that invents `target_fact_id`
+  // must not be able to reach a row outside this conversation's scope.
+  const allowedTargets = memory.scopeIds(thread);
   const applied: ApplyResult[] = [];
   const rejected: Array<{ item: unknown; why: string }> = [];
 
   for (const item of items) {
-    const why = validate(item, byId, memory);
+    const why = validate(item, byId, memory, allowedTargets);
     if (why) {
       rejected.push({ item, why });
       continue;
@@ -217,7 +224,12 @@ export async function distillBatch(
 }
 
 /** Returns a rejection reason, or null when the item is acceptable. */
-function validate(item: any, byId: Map<number, ConversationEventRow>, memory: MemoryStore): string | null {
+function validate(
+  item: any,
+  byId: Map<number, ConversationEventRow>,
+  memory: MemoryStore,
+  allowedTargets: Set<number>,
+): string | null {
   if (!item || typeof item !== "object") return "不是对象";
   if (!ACTIONS.includes(item.action)) return `action 非法: ${item.action}`;
   if (!CATEGORIES.includes(item.category)) return `category 非法: ${item.category}`;
@@ -246,6 +258,9 @@ function validate(item: any, byId: Map<number, ConversationEventRow>, memory: Me
   if (item.action !== "create") {
     const targetFactId = Number(item.target_fact_id);
     if (!Number.isInteger(targetFactId)) return `${item.action} 缺少 target_fact_id`;
+    if (!allowedTargets.has(targetFactId)) {
+      return `target_fact_id ${targetFactId} 不在本次提供的参考记忆中（禁止跨作用域改写）`;
+    }
     const row = memory.byId(targetFactId);
     if (!row) return `target_fact_id ${targetFactId} 不存在`;
     if (row.status !== "active") return `target_fact_id ${targetFactId} 状态为 ${row.status}，无法操作`;

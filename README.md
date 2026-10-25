@@ -148,6 +148,25 @@ Only one `active` row per key (partial unique index). History is status-tagged (
 - **Idle.** `worker` distils threads whose newest undistilled event is older than `idleMinutes` (default 15).
 - **Retryable.** Unparseable output does not mark events distilled, so the next batch retries them.
 
+### Scope: a chat is not a codebase
+
+The same store holds project facts and personal facts, so injection is scoped by thread:
+a row extracted from `feishu:oc_x` is only injected into that conversation, hand-written
+rows (`thread IS NULL`) apply everywhere, and project memories stay in their own thread.
+
+Without this, a question like "我在戒咖啡" gets injected with notes about the RPC transport
+and the agent answers about code — then that reply is recorded as an event and distilled
+into a bogus "fact" about the codebase. That is exactly what the first end-to-end Feishu run
+produced, which is why scoping exists.
+
+Two more guards came out of that same run:
+
+- **Subjects do not share a slot.** Similarity-based dedupe is filtered by `subject`, so two
+  people who both avoid cilantro get two memories instead of one overwriting the other.
+- **`target_fact_id` must be in the reference set** that was actually shown to the extractor.
+  Otherwise a model that invents an id can reach a row outside this conversation and rewrite
+  someone else's memory — which is what happened before the allowlist existed.
+
 ### Injection
 
 Active rows only, ranked by `importance` then recency, cut at 1800 chars, injected at **run time** so a queued task sees memory as it is when it actually runs.
@@ -184,7 +203,6 @@ FEISHU_APP_ID=... FEISHU_APP_SECRET=... node src/cli.ts serve --channel feishu
 ```
 
 ### Feishu setup
-
 1. [open.feishu.cn](https://open.feishu.cn) → 开发者后台 → 创建**企业自建应用**
 2. 添加应用能力 → **机器人**
 3. 权限：`im:message`（接收）、`im:message:send_as_bot`（发送）；想要真实姓名再加 `contact:user.base:readonly`（不加则用 open_id 当名字）
@@ -202,12 +220,35 @@ Long connection is chosen on purpose: the agent runs behind NAT, so a webhook wo
 
 Limits today: only `text` messages are ingested (rich text `post`, images, files are skipped rather than mis-parsed); mentions are stripped (`@_user_1`); display names fall back to `open_id` without the contact scope.
 
+### Two Feishu transports
+
+| mode | needs | use when |
+|---|---|---|
+| `serve --channel feishu` | app credentials | the console is set to 长连接; no public address needed |
+| `serve --channel feishu-webhook` | `FEISHU_ENCRYPT_KEY` for signature checks | you have a public URL, or you want to test locally |
+
+The webhook transport exists because the long connection cannot be exercised without a real
+app. `feishu-webhook` runs an HTTP server that accepts the same events, so the whole pipeline
+(parse → identity → event → run → reply) can be verified on localhost:
+
+```bash
+FEISHU_WEBHOOK_PORT=8787 node src/cli.ts serve --channel feishu-webhook
+node tests/feishu-e2e.mjs 8787 oc_fresh   # post simulated deliveries
+```
+
+It verifies `sha256(timestamp + nonce + encryptKey + body)` before trusting a delivery,
+decrypts the `{encrypt}` envelope (AES-256-CBC, key = sha256(encryptKey), IV = first 16 bytes),
+answers `url_verification` with the challenge, and **acks with 200 before running the agent** —
+Feishu retries slow or non-2xx deliveries, and a retry would otherwise become a second message
+and a second memory.
+
 ### Idempotency
 
 IM platforms redeliver when an ack is slow. `claimMessage(channel, message_id)` records the transport id before the event is created, so a redelivered message is dropped instead of producing a second event — and therefore a second memory. Covered by `tests/channels.test.mjs`.
 
 ```bash
-node tests/channels.test.mjs    # 9 checks: parsing, mentions, post/empty/broken payloads, dedupe
+node tests/channels.test.mjs        # 9 checks: parsing, mentions, post/empty/broken payloads, dedupe
+node tests/feishu-webhook.test.mjs  # 13 checks: signature, decrypt, challenge, ack, token, encrypted event
 ```
 
 Why polling for Telegram: a personal agent lives behind NAT on a laptop, so a webhook would need a tunnel — one more moving part for no benefit. The update cursor is in memory, so a restart re-delivers at most one message.

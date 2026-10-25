@@ -41,7 +41,9 @@ export async function runTask(
 
   // Memory is injected at run time, not at enqueue time: a queued task should see the
   // memory as it is when it actually runs, not as it was when it was created.
-  const injected = memory && cfg.memoryEnabled ? memory.contextBlock(cfg.memoryBudgetChars) : { text: "", ids: [] };
+  const injected = memory && cfg.memoryEnabled
+    ? memory.contextBlock(cfg.memoryBudgetChars, task.thread)
+    : { text: "", ids: [] };
   const finalPrompt = injected.text ? `${injected.text}\n\n---\n\n${task.prompt}` : task.prompt;
   if (injected.ids.length > 0) {
     store.appendEvent(task.id, "memory_injected", { ids: injected.ids, chars: injected.text.length });

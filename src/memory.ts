@@ -279,7 +279,9 @@ export class MemoryStore {
         action = "correct";
         note = `create 降级为 correct：key ${key} 已有活跃记忆 #${target.id}`;
       } else {
-        const candidates = this.active().filter((row) => row.category === category);
+        // Similarity is only meaningful within one subject: two people having the same
+        // preference are two memories, not a correction of each other.
+        const candidates = this.active().filter((row) => row.category === category && row.subject === subject);
         let best: { row: MemoryRow; score: number } | null = null;
         for (const row of candidates) {
           const score = similarity(row.content, write.content);
@@ -405,11 +407,16 @@ export class MemoryStore {
   }
 
   /**
-   * What to inject. Only `active` rows: a contested fact is not a fact yet, so feeding it
-   * to the agent as truth would be worse than saying nothing.
+   * What to inject, scoped to the conversation.
+   *
+   * Project facts must not leak into a personal chat (and vice versa): the same store holds
+   * both, and injecting a codebase note into a "where do I live" question derails the answer.
+   * Rule: rows from this thread, plus hand-written global preferences (thread IS NULL).
    */
-  contextBlock(budgetChars = 1_800): InjectBlock {
-    const rows = this.active();
+  contextBlock(budgetChars = 1_800, thread?: string | null): InjectBlock {
+    const rows = this.active().filter(
+      (row) => !thread || row.thread === null || row.thread === thread,
+    );
     const chosen: MemoryRow[] = [];
     let used = 0;
     for (const row of rows) {
@@ -435,9 +442,19 @@ export class MemoryStore {
     return { text, ids: chosen.map((row) => row.id) };
   }
 
+  /** Ids of the rows that were actually shown to the extractor for this conversation. */
+  scopeIds(thread?: string | null): Set<number> {
+    const rows = this.active().filter(
+      (row) => !thread || row.thread === null || row.thread === thread,
+    );
+    return new Set(rows.map((row) => row.id));
+  }
+
   /** Compact state handed to the extractor, including row IDs for correct/invalidate/contest. */
-  stateBrief(maxChars = 3_000): string {
-    const rows = this.active();
+  stateBrief(maxChars = 3_000, thread?: string | null): string {
+    const rows = this.active().filter(
+      (row) => !thread || row.thread === null || row.thread === thread,
+    );
     if (rows.length === 0) return "（当前没有任何活跃记忆）";
     let out = "";
     for (const row of rows) {

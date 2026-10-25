@@ -441,8 +441,9 @@ async function cmdFeed(args: string[]): Promise<number> {
 
 async function cmdServe(args: string[]): Promise<number> {
   const channel = flagValue(args, "--channel") ?? "telegram";
-  if (channel !== "telegram" && channel !== "feishu") {
-    console.error(`channel "${channel}" is not implemented (available: telegram, feishu)`);
+  const portFlag = flagValue(args, "--port");
+  if (channel !== "telegram" && channel !== "feishu" && channel !== "feishu-webhook") {
+    console.error(`channel "${channel}" is not implemented (available: telegram, feishu, feishu-webhook)`);
     return 2;
   }
 
@@ -515,7 +516,7 @@ async function cmdServe(args: string[]): Promise<number> {
         : null;
 
     if (channel === "feishu-webhook") {
-      const port = Number(process.env.FEISHU_WEBHOOK_PORT ?? 8787);
+      const port = Number(portFlag ?? process.env.FEISHU_WEBHOOK_PORT ?? 8787);
       const server = await startFeishuWebhook({
         port,
         encryptKey,
