@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-10-25T08:09:36.574Z",
+  "model": "deepseek-flash",
+  "baselineRecall": 0,
+  "systemRecall": 1,
+  "summaryGain": 1,
+  "avgSummaryChars": 234,
+  "cases": [
+    {
+      "id": "st01_three_facts_25",
+      "baselinePass": false,
+      "systemPass": true,
+      "baselineAnswer": "这段对话里没有提到任何项目代号或负责人，无法回答。",
+      "systemAnswer": "项目 Orion-7，负责人：王工",
+      "summaryChars": 261,
+      "ms": 11022
+    },
+    {
+      "id": "st02_detail_after_filler",
+      "baselinePass": false,
+      "systemPass": true,
+      "baselineAnswer": "我们刚才的对话里从没提过服务器，所以查不到配置。",
+      "systemAnswer": "32 核 CPU、128G 内存，装有两块 4090 显卡。",
+      "summaryChars": 215,
+      "ms": 7392
+    },
+    {
+      "id": "st03_conflicting_dates",
+      "baselinePass": false,
+      "systemPass": true,
+      "baselineAnswer": "这轮对话里没提到评审会的时间安排，我这边没有相关信息。",
+      "systemAnswer": "评审会定在本周五上午十点。",
+      "summaryChars": 178,
+      "ms": 10260
+    },
+    {
+      "id": "st04_many_numbers",
+      "baselinePass": false,
+      "systemPass": true,
+      "baselineAnswer": "项目里没有限流配置：接口版本是飞书 SDK 的 `im.v1` / `contact.v3`，超时则是 RPC 命令 60s（prompt 30min、distill/summary 120s），因此“限流值”无从取值。",
+      "systemAnswer": "v2.3 / 每秒 500 次 / 30 秒",
+      "summaryChars": 230,
+      "ms": 28543
+    },
+    {
+      "id": "st05_early_constraint",
+      "baselinePass": false,
+      "systemPass": true,
+      "baselineAnswer": "结论：项目本身未声明 license、无 LICENSE 文件，唯一的硬性依赖版本约束是 Node ≥22.19 + 锁定 `@earendil-works/pi-coding-agent@1.4.0`（MIT）——没有对依赖协议的显式限制条款。",
+      "systemAnswer": "不允许引入任何 GPL 协议的依赖。",
+      "summaryChars": 285,
+      "ms": 11152
+    }
+  ]
+}

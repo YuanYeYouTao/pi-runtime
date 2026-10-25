@@ -7,6 +7,7 @@ import type { MemoryCategory } from "./memory.ts";
 import { distillBatch } from "./distill.ts";
 import type { DistillResult } from "./distill.ts";
 import { runEval } from "./eval.ts";
+import { runContextEval } from "./eval-context.ts";
 import { PiRpc } from "./rpc.ts";
 import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
@@ -390,6 +391,12 @@ async function cmdDistill(args: string[]): Promise<number> {
   }
 }
 
+async function cmdEvalContext(args: string[]): Promise<number> {
+  const only = flagValue(args, "--only");
+  const casesPath = flagValue(args, "--cases");
+  return runContextEval({ only, casesPath });
+}
+
 async function cmdEval(args: string[]): Promise<number> {
   const keep = args.includes("--keep");
   const only = flagValue(args, "--only");
@@ -734,6 +741,9 @@ async function main(): Promise<number> {
     case "eval":
     case "bench":
       return cmdEval(rest);
+    case "eval-context":
+    case "bench-ctx":
+      return cmdEvalContext(rest);
     case "feed":
       return cmdFeed(rest);
     case "members":

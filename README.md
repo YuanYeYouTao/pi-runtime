@@ -325,6 +325,34 @@ turn 2  "这个项目下周要过安全评审。"      → summary cursor advanc
 turn 3  "这个项目的代号和负责人分别是什么？"  → "Orion-7，负责人王工。"
 ```
 
+### Context and compression, measured
+
+Two suites, same transcript per case, two conditions:
+
+- **baseline** — a fixed 30-message window, no compression (what a plain window gives you)
+- **system** — a 6-message window plus the rolling summary
+
+```bash
+node src/cli.ts eval-context                            # 10 short cases, 5 filler exchanges
+node src/cli.ts eval-context --cases eval/context-stress.json   # 5 long cases, 20–25 fillers
+```
+
+| 场景 | baseline | system | 结论 |
+|---|---|---|---|
+| 短会话（5 轮闲聊） | 10/10 | 10/10 | 窗口够了，摘要没有增量 |
+| 长会话（20–25 轮闲聊） | **0/5** | **5/5** | 事实被挤出窗口，摘要全部捞回 |
+
+Average summary: 145 chars (short) / 234 chars (long) — far cheaper than carrying the transcript.
+
+The honest reading:
+
+- Summarisation is **not** a general improvement; it pays off exactly when the window can no
+  longer hold the thread. On short conversations it is pure overhead.
+- The baseline is not a straw man, but a **bigger window** would also have passed the long
+  cases. Summarisation wins on *bounded cost*, not on being the only possible answer.
+- At 25 turns the whole transcript is still small. The real justification arrives at hundreds
+  of turns, where an unbounded window stops being an option.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.
