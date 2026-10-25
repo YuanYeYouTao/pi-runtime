@@ -3,7 +3,7 @@ node_modules/
 data/
 config.json
 *.log
-eval/tmp/
+eval/tmp*/
 .DS_Store
 
 # 部署时填写的真实密钥，绝不能进仓库

@@ -8,6 +8,14 @@ export type ComposeSegment = {
   body: string;
   /** Anything worth recording: selected ids, counts, reasons. Never rendered. */
   meta?: Record<string, unknown>;
+  /**
+   * How often this segment changes, which decides where it goes in the prompt.
+   *
+   * Providers cache the longest common prefix, so anything volatile near the front throws
+   * away the cache for the whole tail. Frozen first, volatile last is therefore worth real
+   * money on long conversations, not just tidiness.
+   */
+  stability?: "frozen" | "stable" | "volatile";
 };
 
 export type DropOrder =
@@ -53,6 +61,8 @@ export type ComposeManifest = {
   estimatedTokens: number;
   charsPerToken: number;
   overBudget: boolean;
+  /** Characters in the leading run that does not change between turns (cache-friendly). */
+  cacheableChars: number;
   segments: SegmentReport[];
   skipped: string[];
   dedup: Array<{ kind: string; dropped: string; keptIn: string; similarity: number }>;
@@ -285,12 +295,26 @@ export function compose(
     const currentIndex = prepared.findIndex((item) => item.kind === "current");
     const hint = {
       kind: "conflicts",
+      stability: "volatile",
       title: "## 上下文冲突提示",
       body,
       policy: policyFor("conflicts", options.policies),
     };
     prepared.splice(currentIndex === -1 ? prepared.length : currentIndex, 0, hint);
   }
+
+  // ---- stability ordering ----------------------------------------------------------------
+  // Providers bill cached and uncached prefixes differently, and the cache is a *prefix*:
+  // putting a volatile segment early invalidates everything after it. Sorting is stable, so
+  // segments that do not declare stability keep the order the caller gave them.
+  const STABILITY_RANK: Record<string, number> = { frozen: 0, stable: 1, volatile: 2 };
+  const rankOf = (segment: { kind?: string; stability?: string }): number => {
+    // The current message changes every turn by definition, so it must never sit inside the
+    // cacheable prefix. Treating it as volatile without asking keeps callers from breaking this.
+    if (segment.kind === "current") return 2;
+    return STABILITY_RANK[segment.stability ?? "stable"] ?? 1;
+  };
+  prepared.sort((a, b) => rankOf(a) - rankOf(b));
 
   const active = prepared.filter((segment) => segment.body.trim().length > 0);
   const skipped = prepared.filter((segment) => segment.body.trim().length === 0).map((segment) => segment.kind);
@@ -370,7 +394,11 @@ export function compose(
     if (limit < full.length) {
       const { text: trimmed } = trimLines(full, limit, segment.policy.drop);
       text = trimmed || full.slice(0, limit);
-      evictions.push({ kind: segment.kind, droppedChars: full.length - text.length });
+      const dropped = full.length - text.length;
+      // Never truncate silently: a model that does not know something was cut will answer as
+      // if it saw the whole record. One line costs a few tokens and removes that failure mode.
+      text += `\n（本段因预算被截断 ${dropped} 字符，此处不完整）`;
+      evictions.push({ kind: segment.kind, droppedChars: dropped });
     }
 
     // A trimmed memory block should keep its section header out of the way of counting.
@@ -382,12 +410,20 @@ export function compose(
       floor: segment.policy.floor,
       cap: segment.policy.cap,
       truncated: text.length < full.length,
-      droppedChars: full.length - text.length,
+      droppedChars: Math.max(0, full.length - text.length),
       meta: segment.meta,
     });
   }
 
   usedChars += dividerCost;
+
+  // Everything before the first volatile segment is identical between consecutive turns, so
+  // it is the part a provider can serve from cache.
+  let cacheableChars = 0;
+  for (let index = 0; index < active.length; index++) {
+    if (active[index].stability === "volatile") break;
+    cacheableChars += rendered[index].length + (index > 0 ? DIVIDER.length : 0);
+  }
 
   return {
     prompt: rendered.join(DIVIDER),
@@ -397,6 +433,7 @@ export function compose(
       estimatedTokens: Math.ceil(usedChars / charsPerToken),
       charsPerToken,
       overBudget: budgetChars > 0 && usedChars > budgetChars,
+      cacheableChars,
       segments: reports,
       skipped,
       dedup,

@@ -275,6 +275,7 @@ async function runAttempt(
     const segments: ComposeSegment[] = [];
     segments.push({
       kind: "instructions",
+      stability: "frozen",
       title: "## 约定",
       body: [
         "需要跨轮记住的**临时**信息（端口、分支、待办链接、进度），在回复最后单独一行写：",
@@ -282,13 +283,14 @@ async function runAttempt(
         "不要用它记长期事实（那些交给记忆系统），也永远不要写入密码/密钥/token。",
       ].join("\n"),
     });
-    if (injected.text) segments.push({ kind: "memory", body: injected.text, meta: { ids: injected.ids } });
+    if (injected.text) segments.push({ kind: "memory", stability: "stable", body: injected.text, meta: { ids: injected.ids } });
     if (shortStateBlock.text) {
-      segments.push({ kind: "short_state", body: shortStateBlock.text, meta: { keys: shortStateBlock.keys } });
+      segments.push({ kind: "short_state", stability: "volatile", body: shortStateBlock.text, meta: { keys: shortStateBlock.keys } });
     }
     if (summary.trim()) {
       segments.push({
         kind: "summary",
+        stability: "stable",
         title: "## 更早对话的摘要（已压缩，因果细节以最近对话为准）",
         body: summary.trim(),
       });
@@ -296,12 +298,13 @@ async function runAttempt(
     if (context.text) {
       segments.push({
         kind: "window",
+        stability: "volatile",
         title: "## 最近对话（同一会话，按时间顺序）",
         body: context.text,
         meta: { ids: context.ids, messages: context.messages },
       });
     }
-    segments.push({ kind: "current", title: "## 当前消息", body: task.prompt });
+    segments.push({ kind: "current", stability: "volatile", title: "## 当前消息", body: task.prompt });
 
     // The ratio is learned from provider-reported usage, falling back to the default until
     // there are enough samples to fit.

@@ -19,6 +19,7 @@ import { NOISE_TYPES } from "./event-log.ts";
 import { runMaintenance } from "./maintenance.ts";
 import { archiveConversationEvents, backupDatabase, inspectArchives, newestBackupAgeHours } from "./archive.ts";
 import { normalizeMode, sandboxReport } from "./sandbox.ts";
+import { exportMemoryToGit } from "./memory-git.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -58,6 +59,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts archive [--days 30] [--dry-run] [--list]   归档旧事件为 JSONL.gz
   node src/cli.ts backup [--keep 7]               压缩快照数据库
   node src/cli.ts sandbox [--mode readonly|safe|full]  工具能力策略
+  node src/cli.ts memory-git [--message "..."]   把记忆导出成可 diff 的 Git 仓库
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -340,6 +342,25 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdMemoryGit(args: string[]): number {
+  const message = flagValue(args, "--message");
+  const memory = openMemory();
+  try {
+    const result = exportMemoryToGit(memory, DATA_DIR, { message });
+    console.log(`仓库      ${result.dir}`);
+    console.log(`文件      ${result.files} 个`);
+    if (result.error) {
+      console.error(`提交失败：${result.error}`);
+      return 1;
+    }
+    console.log(result.changed ? `已提交    ${result.commit}` : "无变化    未产生提交");
+    console.log("查看      git -C " + result.dir + " log --oneline");
+    return 0;
+  } finally {
+    memory.close();
+  }
 }
 
 function cmdSandbox(args: string[]): number {
@@ -1057,6 +1078,8 @@ async function main(): Promise<number> {
       return cmdArchive(rest);
     case "sandbox":
       return cmdSandbox(rest);
+    case "memory-git":
+      return cmdMemoryGit(rest);
     case "backup":
       return cmdBackup(rest);
     case "resolve":

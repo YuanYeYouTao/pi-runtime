@@ -38,7 +38,9 @@ const POLICIES = {
     policies: POLICIES,
   });
   const memoryReport = manifest.segments.find((s) => s.kind === "memory");
-  check("memory capped at its ceiling", memoryReport.chars <= POLICIES.memory.cap + 1, String(memoryReport.chars));
+  // The cap applies to content; the truncation notice is added on top so the model knows.
+  check("memory capped near its ceiling", memoryReport.chars <= POLICIES.memory.cap + 60, String(memoryReport.chars));
+  check("truncation is announced to the model", prompt.includes("被截断"), prompt.slice(-80));
   check("capping is reported", memoryReport.truncated === true);
   check("current message untouched", prompt.endsWith("Q"));
 }
@@ -139,6 +141,39 @@ const POLICIES = {
   check("memory is capped", DEFAULT_POLICIES.memory.cap === 900);
   check("current is protected", DEFAULT_POLICIES.current.protected === true);
   check("instructions are protected", DEFAULT_POLICIES.instructions.protected === true);
+}
+
+// 11) stability ordering keeps the cacheable prefix as long as possible
+{
+  const { prompt, manifest } = compose(
+    [
+      { kind: "short_state", body: "- port = 8080", stability: "volatile" },
+      { kind: "current", title: "## 当前消息", body: "Q", stability: "volatile" },
+      { kind: "window", body: "[Rick] 刚才说的话", stability: "volatile" },
+      { kind: "summary", body: "- 早先的摘要", stability: "stable" },
+      { kind: "instructions", body: "## 约定\n固定规则", stability: "frozen" },
+    ],
+    { budgetChars: 10_000, policies: POLICIES },
+  );
+  const order = ["## 约定", "早先的摘要", "port = 8080", "## 当前消息", "刚才说的话"].map((needle) => prompt.indexOf(needle));
+  check("frozen first, volatile last", order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1])), JSON.stringify(order));
+  check("cacheable prefix covers frozen + stable", manifest.cacheableChars > 0 && manifest.cacheableChars < manifest.usedChars, `${manifest.cacheableChars}/${manifest.usedChars}`);
+  // The first volatile segment in caller order is short_state; the cacheable run ends at it.
+  check(
+    "cacheable prefix stops before the first volatile segment",
+    manifest.cacheableChars === prompt.indexOf("- port = 8080") - "\n\n---\n\n".length,
+    `${manifest.cacheableChars} vs ${prompt.indexOf("- port = 8080") - 9}`,
+  );
+}
+
+// 12) without stability hints the caller's order is preserved
+{
+  const { prompt } = compose([
+    { kind: "memory", body: "M" },
+    { kind: "summary", body: "S" },
+    { kind: "current", body: "C" },
+  ]);
+  check("default order is unchanged", prompt === "M\n\n---\n\nS\n\n---\n\nC", JSON.stringify(prompt));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
