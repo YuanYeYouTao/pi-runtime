@@ -74,6 +74,19 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > "压缩会丢什么？你怎么验证没丢关键信息？"
 
+## Phase 2.6 — 可靠性与预算 ✅
+
+- [x] 重试：按错误分类（429/5xx/网络/子进程退出 可重试；缺 key/模型不存在/401/超预算 不可重试）
+- [x] 指数退避 + full jitter + 上限；`sleep` 可注入以便测试
+- [x] 以「任务」为重试单位，每次尝试新起 pi 进程；用户消息只记一次（重试不制造第二条事件/记忆）
+- [x] 并发门 `Gate`：`maxConcurrent` + `minIntervalMs`（并发数表达不了"每分钟最多几次"）
+- [x] 预算用 **provider 真实用量**（`totalTokens` + `cost.total` 对象），每日上限 + 单任务上限
+- [x] 失败也记账（失败的尝试同样烧 token）
+- [x] 实测：超预算 449ms 内拒绝、零 token；不可重试错误 2.3s 内失败、无退避
+- [ ] 检索（可选）：bigram 优先；FTS5 trigram 对 2 字中文失效（已实测）
+
+> "一次 429 会发生什么？预算怎么不失控？"
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）

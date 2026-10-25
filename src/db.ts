@@ -87,8 +87,23 @@ export class Store {
     `);
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_ce_thread ON conversation_events(thread, id);");
 
-    // Rolling summary per conversation: the events before `summarized_until_event_id` are
-    // represented by `summary`; the originals stay in conversation_events and can be re-read.
+    // Provider-reported usage per run: the basis for the daily/per-task budget.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS usage (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id     TEXT,
+        day         TEXT NOT NULL,
+        model       TEXT,
+        input       INTEGER NOT NULL DEFAULT 0,
+        output      INTEGER NOT NULL DEFAULT 0,
+        cache_read  INTEGER NOT NULL DEFAULT 0,
+        cache_write INTEGER NOT NULL DEFAULT 0,
+        total       INTEGER NOT NULL DEFAULT 0,
+        cost        REAL NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL
+      );
+    `);
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_usage_day ON usage(day);");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS thread_state (
         thread                     TEXT PRIMARY KEY,
@@ -288,6 +303,52 @@ export class Store {
     return this.db
       .prepare("SELECT * FROM conversation_events WHERE thread = ? AND id > ? AND id < ? ORDER BY id ASC LIMIT ?")
       .all(thread, afterId, beforeId, limit) as ConversationEventRow[];
+  }
+
+  // ---- usage / budget ----
+
+  recordUsage(taskId: string, model: string, usage: {
+    input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number; cost?: number;
+  }): void {
+    const day = new Date().toISOString().slice(0, 10);
+    // Provider numbers arrive as numbers, but a missing/NaN field must never break the write
+    // (SQLite binds NaN as NULL, which trips NOT NULL).
+    const safe = (value: unknown): number => {
+      const numeric = Number(value ?? 0);
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+    this.db
+      .prepare(
+        `INSERT INTO usage (task_id, day, model, input, output, cache_read, cache_write, total, cost, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        taskId,
+        day,
+        model,
+        safe(usage.input),
+        safe(usage.output),
+        safe(usage.cacheRead),
+        safe(usage.cacheWrite),
+        safe(usage.total),
+        safe(usage.cost),
+        now(),
+      );
+  }
+
+  usageToday(): { total: number; cost: number; runs: number } {
+    const day = new Date().toISOString().slice(0, 10);
+    const row = this.db
+      .prepare("SELECT COALESCE(SUM(total),0) total, COALESCE(SUM(cost),0) cost, COUNT(*) runs FROM usage WHERE day = ?")
+      .get(day) as { total: number; cost: number; runs: number };
+    return { total: Number(row.total), cost: Number(row.cost), runs: Number(row.runs) };
+  }
+
+  usageForTask(taskId: string): { total: number; cost: number } {
+    const row = this.db
+      .prepare("SELECT COALESCE(SUM(total),0) total, COALESCE(SUM(cost),0) cost FROM usage WHERE task_id = ?")
+      .get(taskId) as { total: number; cost: number };
+    return { total: Number(row.total), cost: Number(row.cost) };
   }
 
   threadState(thread: string): { summary: string; summarizedUntil: number } {

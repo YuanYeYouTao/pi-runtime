@@ -353,6 +353,66 @@ The honest reading:
 - At 25 turns the whole transcript is still small. The real justification arrives at hundreds
   of turns, where an unbounded window stops being an option.
 
+## Limits: retry, concurrency, budget
+
+Three independent protections, because they fail differently.
+
+### Retry — only for errors that pass on their own
+
+`src/retry.ts` classifies before it retries:
+
+| retryable | not retryable |
+|---|---|
+| 429 / rate limit / 5xx | no API key |
+| timeouts, ECONNRESET, socket hang up | model not found |
+| agent subprocess exiting | 401 / 403 |
+| "temporarily unavailable" | budget exceeded |
+
+Backoff is exponential with full jitter, capped: `min(maxMs, base × 2^(n-1))`, then randomised
+into `[half, full]`. Retrying a configuration error just burns time and money, so the
+classification matters more than the schedule.
+
+The **task row** is the retry unit, not the process: every attempt spawns a fresh
+`pi --mode rpc`, so a hung attempt cannot poison the next one. The user message is recorded
+once, before the loop — a retry must not create a second event (and therefore a second memory).
+
+### Concurrency — a gate, not just a queue
+
+`src/gate.ts` caps `maxConcurrent` **and** spaces starts with `minIntervalMs`. Concurrency
+alone cannot express "at most one start per N ms", which is what a per-minute rate limit
+actually needs.
+
+### Budget — provider-reported, not estimated
+
+pi reports real usage on every `message_update`:
+
+```json
+{ "input": 249, "output": 148, "cacheRead": 5888, "totalTokens": 6285,
+  "cost": { "total": 0.000287628 } }
+```
+
+Two gotchas, both silent if you get them wrong: the total is `totalTokens` (not `total`), and
+`cost` is an **object**. `Number(object)` is `NaN`, and SQLite binds `NaN` as `NULL`, which
+trips `NOT NULL` — the first real run failed exactly this way. `normalizeUsage()` and a
+`safe()` coercion in the store now pin the shape, and `tests/usage.test.mjs` locks it.
+
+- **Daily cap**: checked before the run; blocks in ~450 ms with `budget_exceeded` and without
+  spending a token.
+- **Per-task cap**: checked on every usage update mid-run; the run is aborted, and the partial
+  spend is still recorded, because a failed attempt burned tokens too.
+
+```
+config.limits.maxAttempts     3         total attempts per task
+config.limits.retryBaseMs     2000      backoff base
+config.limits.maxRetryMs      30000     backoff cap
+config.limits.maxConcurrent   1         parallel runs
+config.limits.minIntervalMs   0         spacing between starts
+config.limits.dailyTokens     2000000   0 disables
+config.limits.taskTokens      200000    0 disables
+```
+
+`pi-rt stats` shows today's tokens, cost and run count next to the memory counters.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

@@ -15,6 +15,15 @@
     "summaryTriggerChars": 2400,
     "summaryMaxChars": 1200
   },
+  "limits": {
+    "maxAttempts": 3,
+    "retryBaseMs": 2000,
+    "maxRetryMs": 30000,
+    "maxConcurrent": 1,
+    "minIntervalMs": 0,
+    "dailyTokens": 2000000,
+    "taskTokens": 200000
+  },
   "feishu": {
     "appId": "cli_xxxxxxxxxxxx",
     "appSecret": "your-app-secret"

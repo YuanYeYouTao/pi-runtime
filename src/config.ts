@@ -26,6 +26,18 @@ export type FeishuConfig = {
   verificationToken?: string;
 };
 
+export type LimitConfig = {
+  /** Total attempts per task, including the first. */
+  maxAttempts: number;
+  retryBaseMs: number;
+  maxRetryMs: number;
+  maxConcurrent: number;
+  minIntervalMs: number;
+  /** 0 disables the corresponding budget. */
+  dailyTokens: number;
+  taskTokens: number;
+};
+
 export type RuntimeConfig = {
   provider?: string;
   model?: string;
@@ -56,6 +68,8 @@ export type RuntimeConfig = {
   summaryEnabled: boolean;
   summaryTriggerChars: number;
   summaryMaxChars: number;
+  /** Retry, concurrency and spend limits. */
+  limits: LimitConfig;
 };
 
 export function ensureDirs(): void {
@@ -91,6 +105,15 @@ export function loadConfig(): RuntimeConfig {
     summaryEnabled: (process.env.PI_RT_SUMMARY ?? String(raw.context?.summary ?? true)) !== "false",
     summaryTriggerChars: Number(process.env.PI_RT_SUMMARY_TRIGGER ?? raw.context?.summaryTriggerChars ?? 2_400),
     summaryMaxChars: Number(process.env.PI_RT_SUMMARY_MAX ?? raw.context?.summaryMaxChars ?? 1_200),
+    limits: {
+      maxAttempts: Number(process.env.PI_RT_MAX_ATTEMPTS ?? raw.limits?.maxAttempts ?? 3),
+      retryBaseMs: Number(process.env.PI_RT_RETRY_BASE_MS ?? raw.limits?.retryBaseMs ?? 2_000),
+      maxRetryMs: Number(process.env.PI_RT_MAX_RETRY_MS ?? raw.limits?.maxRetryMs ?? 30_000),
+      maxConcurrent: Number(process.env.PI_RT_MAX_CONCURRENT ?? raw.limits?.maxConcurrent ?? 1),
+      minIntervalMs: Number(process.env.PI_RT_MIN_INTERVAL_MS ?? raw.limits?.minIntervalMs ?? 0),
+      dailyTokens: Number(process.env.PI_RT_DAILY_TOKENS ?? raw.limits?.dailyTokens ?? 2_000_000),
+      taskTokens: Number(process.env.PI_RT_TASK_TOKENS ?? raw.limits?.taskTokens ?? 200_000),
+    },
   };
 }
 

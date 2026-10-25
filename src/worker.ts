@@ -3,7 +3,9 @@ import type { RpcRecord } from "./rpc.ts";
 import type { Store, TaskRow } from "./db.ts";
 import type { MemoryStore } from "./memory.ts";
 import { buildConversationContext } from "./context.ts";
+import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
+import { withRetry } from "./retry.ts";
 import { PI_CLI, piArgs, piEnv } from "./config.ts";
 import type { RuntimeConfig } from "./config.ts";
 
@@ -17,11 +19,56 @@ export type RunHooks = {
 /** Event types we surface on the status line instead of the transcript. */
 const TOOL_EVENT = /^tool_|_tool_/;
 
+type Usage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+  cost?: number;
+};
+
 /**
- * Execute one task by spawning a fresh `pi --mode rpc` process.
+ * pi reports `totalTokens` and a `cost` object; the store wants flat numbers. Getting this
+ * wrong is silent — `Number(object)` is NaN and SQLite turns NaN into NULL.
+ */
+function normalizeUsage(raw: any): Usage {
+  const num = (value: unknown): number => {
+    const numeric = Number(value ?? 0);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+  return {
+    input: num(raw.input),
+    output: num(raw.output),
+    cacheRead: num(raw.cacheRead),
+    cacheWrite: num(raw.cacheWrite),
+    total: num(raw.totalTokens ?? raw.total),
+    cost: raw.cost && typeof raw.cost === "object" ? num(raw.cost.total) : num(raw.cost),
+  };
+}
+
+let sharedGate: Gate | null = null;
+let sharedGateKey = "";
+
+/** One gate per process, keyed by the configured limits (tests can swap configs). */
+function gateFor(cfg: RuntimeConfig): Gate {
+  const key = `${cfg.limits.maxConcurrent}:${cfg.limits.minIntervalMs}`;
+  if (!sharedGate || sharedGateKey !== key) {
+    sharedGate = new Gate(cfg.limits.maxConcurrent, cfg.limits.minIntervalMs);
+    sharedGateKey = key;
+  }
+  return sharedGate;
+}
+
+export class BudgetExceededError extends Error {}
+
+/**
+ * Execute one task: admission control → budget → attempt → retry.
  *
- * The process is disposable by design: it holds no database and listens on no port,
- * so a crash costs us one task, not the queue. Everything durable is written to `Store`.
+ * The task row is the unit of retry, not the process. Each attempt spawns a fresh
+ * `pi --mode rpc` process, so a hung or crashed attempt cannot poison the next one, and the
+ * user message is recorded once (not once per attempt) so the conversation history and the
+ * memory evidence do not multiply.
  */
 export async function runTask(
   store: Store,
@@ -29,6 +76,64 @@ export async function runTask(
   task: TaskRow,
   hooks: RunHooks = {},
   memory: MemoryStore | null = null,
+): Promise<string> {
+  const release = await gateFor(cfg).acquire();
+  try {
+    const today = store.usageToday();
+    if (cfg.limits.dailyTokens > 0 && today.total >= cfg.limits.dailyTokens) {
+      const message = `budget_exceeded: 今日已用 ${today.total} tokens，达到上限 ${cfg.limits.dailyTokens}`;
+      store.failTask(task.id, message);
+      hooks.onStatus?.(message);
+      throw new BudgetExceededError(message);
+    }
+
+    // Recorded once, outside the retry loop: a retry must not create a second user event.
+    if (hooks.recordUserEvent !== false) {
+      const userEventId = store.addConversationEvent(task.thread, cfg.ownerName, "user", task.prompt, task.id);
+      hooks.onStatus?.(`event #${userEventId} recorded`);
+    }
+
+    // Memory is injected at run time, not at enqueue time: a queued task should see the
+    // memory as it is when it actually runs, not as it was when it was created.
+    const injected = memory && cfg.memoryEnabled
+      ? memory.contextBlock(cfg.memoryBudgetChars, task.thread)
+      : { text: "", ids: [] };
+    if (injected.ids.length > 0) {
+      store.appendEvent(task.id, "memory_injected", { ids: injected.ids, chars: injected.text.length });
+      hooks.onStatus?.(`memory: 注入 ${injected.ids.length} 条 / ${injected.text.length} 字符`);
+    }
+
+    try {
+      const result = await withRetry(
+        (attempt) => runAttempt(store, cfg, task, hooks, memory, injected, attempt),
+        { attempts: cfg.limits.maxAttempts, baseMs: cfg.limits.retryBaseMs, maxMs: cfg.limits.maxRetryMs },
+        {
+          onRetry: (attempt, delayMs, error) => {
+            store.appendEvent(task.id, "task_retry", { attempt, delayMs, error: error.message.slice(0, 400) });
+            hooks.onStatus?.(`retry ${attempt + 1}/${cfg.limits.maxAttempts} in ${delayMs}ms after: ${error.message.slice(0, 100)}`);
+          },
+        },
+      );
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      store.failTask(task.id, message);
+      throw error;
+    }
+  } finally {
+    release();
+  }
+}
+
+/** One attempt: build the prompt, run pi, stream the answer, account for the spend. */
+async function runAttempt(
+  store: Store,
+  cfg: RuntimeConfig,
+  task: TaskRow,
+  hooks: RunHooks,
+  memory: MemoryStore | null,
+  injected: { text: string; ids: number[] },
+  attempt: number,
 ): Promise<string> {
   const rpc = new PiRpc({
     cliPath: PI_CLI,
@@ -40,21 +145,23 @@ export async function runTask(
 
   let transcript = "";
   let lastError: string | null = null;
-
-  // Memory is injected at run time, not at enqueue time: a queued task should see the
-  // memory as it is when it actually runs, not as it was when it was created.
-  const injected = memory && cfg.memoryEnabled
-    ? memory.contextBlock(cfg.memoryBudgetChars, task.thread)
-    : { text: "", ids: [] };
-  if (injected.ids.length > 0) {
-    store.appendEvent(task.id, "memory_injected", { ids: injected.ids, chars: injected.text.length });
-    hooks.onStatus?.(`memory: 注入 ${injected.ids.length} 条 / ${injected.text.length} 字符`);
-  }
+  let usage: Usage | null = null;
+  let budgetTripped = false;
 
   rpc.on("record", (record: RpcRecord) => {
     store.appendEvent(task.id, record.type, record);
 
     if (record.type === "message_update") {
+      if (record.usage && typeof record.usage === "object") {
+        usage = normalizeUsage(record.usage);
+        const total = usage.total ?? 0;
+        if (!budgetTripped && cfg.limits.taskTokens > 0 && total > cfg.limits.taskTokens) {
+          budgetTripped = true;
+          lastError = `budget_exceeded: 单任务 ${total} tokens 超过上限 ${cfg.limits.taskTokens}`;
+          hooks.onStatus?.(lastError);
+          void rpc.dispose();
+        }
+      }
       const event = record.assistantMessageEvent;
       if (event?.type === "text_delta" && typeof event.delta === "string") {
         transcript += event.delta;
@@ -85,13 +192,6 @@ export async function runTask(
   }, cfg.maxMinutes * 60_000);
 
   try {
-    // The user's message becomes a numbered event before the run starts, so even a failed
-    // run leaves evidence that the extraction step could bind to.
-    if (hooks.recordUserEvent !== false) {
-      const userEventId = store.addConversationEvent(task.thread, cfg.ownerName, "user", task.prompt, task.id);
-      hooks.onStatus?.(`event #${userEventId} recorded`);
-    }
-
     // History is read *after* the current message is stored (or skipped), so the window is
     // strictly "everything before this message" — the current text is never duplicated.
     const lastId = store.lastEventId(task.thread);
@@ -149,7 +249,7 @@ export async function runTask(
     const finalPrompt = sections.join("\n\n---\n\n");
 
     rpc.start();
-    hooks.onStatus?.(`pi pid=${(rpc as any).child?.pid ?? "?"} cwd=${task.cwd}`);
+    hooks.onStatus?.(`pi pid=${(rpc as any).child?.pid ?? "?"} attempt=${attempt}`);
 
     await rpc.prompt(finalPrompt, cfg.maxMinutes * 60_000 + 5_000);
 
@@ -165,11 +265,14 @@ export async function runTask(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const stderr = rpc.stderrTail.trim();
-    const detail = stderr ? `${message}\n--- pi stderr ---\n${stderr.slice(-1500)}` : message;
-    store.failTask(task.id, detail);
-    throw new Error(detail);
+    throw new Error(stderr ? `${message}\n--- pi stderr ---\n${stderr.slice(-1500)}` : message);
   } finally {
     clearTimeout(wallClock);
+    // Spend is recorded on failure too: a failed attempt still burned tokens.
+    if (usage) {
+      store.recordUsage(task.id, cfg.model ?? "default", usage);
+      store.appendEvent(task.id, "usage", usage);
+    }
     await rpc.dispose();
   }
 }

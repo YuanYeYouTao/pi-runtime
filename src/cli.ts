@@ -595,6 +595,12 @@ function cmdStats(): number {
   console.log(`  active      ${stats.active} (preference ${stats.byCategory.preference ?? 0} / fact ${stats.byCategory.fact ?? 0} / event ${stats.byCategory.event ?? 0})`);
   console.log(`  superseded  ${stats.superseded}`);
   console.log(`  invalidated ${stats.invalidated}`);
+  const today = store.usageToday();
+  console.log("usage（今日）");
+  console.log(`  tokens      ${today.total}`);
+  console.log(`  cost        $${today.cost.toFixed(4)}`);
+  console.log(`  runs        ${today.runs}`);
+  console.log(`  budget      ${loadConfig().limits.dailyTokens} tokens/day`);
   memory.close();
   store.close();
   return 0;
