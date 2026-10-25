@@ -264,6 +264,13 @@ function validate(
   const event = byId.get(eventId);
   if (!event) return `evidence_event_id ${eventId} 不在本批事件里`;
 
+  // The assistant's own words are not evidence. A reply can paraphrase, guess or invent, and
+  // learning from it lets the model launder a guess into a "fact" about the user. Only user
+  // messages are a legitimate source; an assistant-only assertion is dropped.
+  if (event.role !== "user") {
+    return `证据必须来自用户消息（事件 #${eventId} 的角色是 ${event.role}）`;
+  }
+
   if (typeof item.evidence_quote !== "string" || item.evidence_quote.trim().length < 2) return "evidence_quote 为空";
   const quote = normalize(item.evidence_quote);
   if (!normalize(event.text).includes(quote)) {

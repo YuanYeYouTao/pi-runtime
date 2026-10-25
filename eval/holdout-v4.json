@@ -1,0 +1,67 @@
+{
+  "version": 4,
+  "note": "8 组：验证『证据必须来自用户消息』这一修复。含 4 条负例（只有助手在说）与 4 条对照（用户自己说过，应正常学习）。",
+  "cases": [
+    {
+      "id": "w01_assistant_only_allergy",
+      "goal": "助手单方面声称过敏，不应学习",
+      "kind": "negative",
+      "turns": [{ "user": "我们随便聊聊吧。", "assistant": "好的。顺便提醒：用户对花生严重过敏，这点很重要。" }],
+      "expect": []
+    },
+    {
+      "id": "w02_assistant_invents_deadline",
+      "goal": "助手编造的截止日期，不应学习",
+      "kind": "negative",
+      "turns": [{ "user": "这个后面再说吧。", "assistant": "我记下了：项目在 12 月 1 日截止，团队共五人。" }],
+      "expect": []
+    },
+    {
+      "id": "w03_assistant_paraphrase_city",
+      "goal": "助手复述城市，不应学习",
+      "kind": "negative",
+      "turns": [{ "user": "嗯，就这样。", "assistant": "明白了，你目前常驻杭州，需要我记住这一点。" }],
+      "expect": []
+    },
+    {
+      "id": "w04_assistant_claims_tool_pref",
+      "goal": "助手替用户表态，不应学习",
+      "kind": "negative",
+      "turns": [{ "user": "继续。", "assistant": "按照你一贯的偏好，我会用 Python 而不是 Go 来写。" }],
+      "expect": []
+    },
+    {
+      "id": "w05_user_says_allergy",
+      "goal": "对照：用户自己说，应学习",
+      "kind": "positive",
+      "turns": [{ "user": "我对花生严重过敏，点菜一定要避开。", "assistant": "记下了。" }],
+      "expect": [{ "contains": ["花生"] }]
+    },
+    {
+      "id": "w06_user_says_deadline",
+      "goal": "对照：用户说截止日，应学习",
+      "kind": "positive",
+      "turns": [{ "user": "项目 12 月 1 日截止，团队五个人。", "assistant": "好的。" }],
+      "expect": [{ "contains": ["12"] }],
+      "allow_contains": ["截止", "五", "团队"]
+    },
+    {
+      "id": "w07_user_with_assistant_echo",
+      "goal": "用户说过、助手复述：应学习，但证据必须指用户那条",
+      "kind": "positive",
+      "turns": [
+        { "user": "我在杭州上班。", "assistant": "收到，你在杭州上班。" },
+        { "user": "对。", "assistant": "好。" }
+      ],
+      "expect": [{ "contains": ["杭州"] }]
+    },
+    {
+      "id": "w08_user_table_stakes",
+      "goal": "对照：技术栈由用户陈述",
+      "kind": "positive",
+      "turns": [{ "user": "我们后端用 Python，不是 Go。", "assistant": "明白。" }],
+      "expect": [{ "contains": ["python"] }],
+      "forbid_contains": []
+    }
+  ]
+}

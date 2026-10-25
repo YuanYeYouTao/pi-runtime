@@ -122,8 +122,15 @@ function matches(
   return (expect.contains ?? []).every((keyword) => content.includes(normalize(keyword)));
 }
 
+const STATE_CHECKS = ["contested", "no_active", "old_inactive", "active_with"] as const;
+
 function checkState(memory: MemoryStore, check: EvalCase["state_check"]): boolean | null {
   if (!check) return null;
+  // An unknown `must_be` would fall through to the default branch and be judged as a plain
+  // content assertion — which is how a typo ("invalidated") once looked like a system bug.
+  if (!(STATE_CHECKS as readonly string[]).includes(check.must_be)) {
+    throw new Error(`state_check.must_be 非法: ${check.must_be}（可用：${STATE_CHECKS.join("/")}）`);
+  }
   const rows = memory.history(check.key);
   if (check.must_be === "contested") return rows.some((row) => row.status === "contested");
   const active = rows.filter((row) => row.status === "active");

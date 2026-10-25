@@ -819,6 +819,17 @@ would have reported anywhere from 83 % to 93 %.
 
 Full write-up: [eval/holdout-v3-results.md](eval/holdout-v3-results.md).
 
+**Correction, same day.** `v20_invalidate` was not a system defect: my assertion used
+`must_be: "invalidated"`, which the checker does not support, so it fell through to a plain
+content check and failed on an empty active set. The invalidation had worked. Two changes came
+out of that: `checkState` now throws on an unknown `must_be` instead of silently mis-judging,
+and the case was corrected to `old_inactive`.
+
+The real defect was `v25`, and it is fixed: **evidence must come from a user message**. An
+assistant's own paraphrase, guess or invention is not a source. Re-validated on a fresh 8-case
+set (`eval/holdout-v4.json`: 4 assistant-only claims, 4 user-stated controls): **8/8**, with all
+four assistant-only claims rejected and all four controls learned.
+
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.
 
 ```bash

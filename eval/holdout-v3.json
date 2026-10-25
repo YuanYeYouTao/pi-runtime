@@ -153,7 +153,7 @@
       "seed": [{ "key": "morning_run", "category": "preference", "content": "每天早上晨跑五公里", "importance": 3 }],
       "turns": [{ "user": "我晨跑已经彻底停了，膝盖不行。", "assistant": "记下了。" }],
       "expect": [],
-      "state_check": { "key": "morning_run", "must_be": "invalidated" }
+      "state_check": { "key": "morning_run", "must_be": "old_inactive", "absent": ["晨跑"] }
     },
     {
       "id": "v21_restate",
