@@ -775,6 +775,50 @@ extracted by the next tick, producing `trip_budget_cny` without any manual comma
 
 ## Evaluating memory
 
+Three sets, deliberately kept separate:
+
+| set | purpose | status |
+|---|---|---|
+| `eval/cases.json` (28) | development benchmark, tuned against | in-sample, must not be quoted |
+| `eval/holdout.json` (10) | first held-out run | burned by `h01` (credential leak) |
+| `eval/holdout-secrets.json` (10) | validates the credential guard | burned by assertion fixes |
+| `eval/holdout-v3.json` (30) | **current benchmark of record** | run once, 3 repetitions |
+
+A single pass reports a number; it does not tell you whether that number is stable. `--repeat`
+runs the whole suite again and reports mean / min / max / range, which is the difference between
+"9 out of 10" and "87 % ± 10 points".
+
+```bash
+pi-rt eval --cases eval/holdout-v3.json --repeat 3
+```
+
+The discipline that makes the number mean anything: the set was written **before** the run, and
+nothing is tuned afterwards. When a case fails, the failure is reported as a finding, not fixed
+in the same breath — otherwise the benchmark becomes a description of the fix.
+
+### Result: 30 cases × 3 runs
+
+| metric | mean | min | max | range |
+|---|---|---|---|---|
+| pass rate | **87.8 %** | 83.3 % | 93.3 % | 10.0 pt |
+| precision | 85.0 % | 80.0 % | 88.0 % | 8.0 pt |
+| recall | 93.9 % | 90.9 % | 100.0 % | 9.1 pt |
+| credential leaks | **0** | 0 | 0 | 0 |
+
+Two failures are **systematic** (wrong in all three runs) and both point at the same idea —
+an assertion's *source* is not constrained:
+
+- `v25_paraphrase` — the only factual sentence was the assistant paraphrasing; the extractor
+  learned it. Validation checks that the quote is in the cited event, not that the event is a
+  **user** message.
+- `v20_invalidate` — the action was recognised (`invalidate:morning_run`) but the state never
+  flipped, because the model omitted `target_fact_id` and nothing bound the action to a row.
+
+Four others flip between runs, which is the whole argument for `--repeat`: a single pass here
+would have reported anywhere from 83 % to 93 %.
+
+Full write-up: [eval/holdout-v3-results.md](eval/holdout-v3-results.md).
+
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.
 
 ```bash

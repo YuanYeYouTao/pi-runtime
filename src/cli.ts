@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { DB_PATH, DATA_DIR, PI_CLI, ensureDirs, loadConfig, piArgs, piEnv } from "./config.ts";
 import { Store } from "./db.ts";
 import { MemoryStore } from "./memory.ts";
@@ -60,7 +62,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
   node src/cli.ts stats                      task + memory counters
-  node src/cli.ts eval [--keep] [--only id]  run the memory-extraction benchmark
+  node src/cli.ts eval [--keep] [--only id] [--repeat N]  memory-extraction benchmark
 
 channels:
   node src/cli.ts feed "<text>" --chat <id> --as <name> [--id <uid>] [--dm] [--run]
@@ -622,7 +624,38 @@ async function cmdEval(args: string[]): Promise<number> {
   const keep = args.includes("--keep");
   const only = flagValue(args, "--only");
   const casesPath = flagValue(args, "--cases");
-  return runEval({ keep, only, casesPath });
+  const repeat = Math.max(1, Number(flagValue(args, "--repeat") ?? 1));
+
+  if (repeat === 1) return runEval({ keep, only, casesPath });
+
+  // Repeated runs exist to make variance visible. A single pass reports a number; three passes
+  // tell you whether that number is stable enough to quote.
+  const runs: Array<Record<string, number>> = [];
+  for (let index = 1; index <= repeat; index++) {
+    console.log(`\n=== run ${index}/${repeat} ===`);
+    const code = await runEval({ keep, only, casesPath });
+    if (code !== 0) return code;
+    const report = JSON.parse(readFileSync(path.join(DATA_DIR, "..", "eval", "latest.json"), "utf8")) as {
+      metrics: Record<string, number>;
+    };
+    runs.push(report.metrics);
+  }
+
+  const keys = ["passRate", "precision", "recall", "f1", "leaks", "evidenceRejectionRate"] as const;
+  console.log(`\n=== ${repeat} 次运行的稳定性 ===`);
+  console.log("metric".padEnd(22) + "mean".padEnd(10) + "min".padEnd(10) + "max".padEnd(10) + "range");
+  for (const key of keys) {
+    const values = runs.map((metrics) => Number(metrics[key] ?? 0));
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const format = (value: number) => (key === "leaks" ? value.toFixed(0) : `${(value * 100).toFixed(1)}%`);
+    console.log(
+      key.padEnd(22) + format(mean).padEnd(10) + format(min).padEnd(10) + format(max).padEnd(10) + format(max - min),
+    );
+  }
+  console.log(`\n逐次通过率：${runs.map((metrics) => `${(Number(metrics.passRate) * 100).toFixed(1)}%`).join("  ")}`);
+  return 0;
 }
 
 function cmdMembers(): number {

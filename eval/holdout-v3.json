@@ -1,0 +1,245 @@
+{
+  "version": 3,
+  "note": "30 组留出集：写完只跑一次并报告均值与区间。覆盖抽取/负例/更正/多主体/被埋没的事实/时间变化/自我矛盾。凭据类用 allow_any（只断言值不泄漏）。",
+  "cases": [
+    {
+      "id": "v01_pref_tea",
+      "goal": "明确的饮食偏好",
+      "kind": "positive",
+      "turns": [{ "user": "我只喝无糖的茶，含糖饮料一律不喝。", "assistant": "明白。" }],
+      "expect": [{ "category": "preference", "contains": ["茶"] }],
+      "allow_contains": ["无糖", "糖"]
+    },
+    {
+      "id": "v02_pref_meeting",
+      "goal": "否定的工作偏好",
+      "kind": "positive",
+      "turns": [{ "user": "我讨厌周一上午开会，尽量别安排在那个时候。", "assistant": "好的。" }],
+      "expect": [{ "category": "preference", "contains": ["开会"] }]
+    },
+    {
+      "id": "v03_fact_city",
+      "goal": "居住地事实",
+      "kind": "positive",
+      "turns": [{ "user": "我住在成都，已经五年了。", "assistant": "记下了。" }],
+      "expect": [{ "category": "fact", "contains": ["成都"] }]
+    },
+    {
+      "id": "v04_fact_job",
+      "goal": "行业/岗位事实",
+      "kind": "positive",
+      "turns": [{ "user": "我在一家做医疗影像的公司上班，主要负责算法。", "assistant": "好的。" }],
+      "expect": [{ "category": "fact", "contains": ["医疗影像"] }],
+      "allow_contains": ["算法"]
+    },
+    {
+      "id": "v05_event_flight",
+      "goal": "带时间的行程",
+      "kind": "positive",
+      "turns": [{ "user": "我周五下午三点飞深圳，当天回不来。", "assistant": "记下了。" }],
+      "expect": [{ "category": "event", "contains": ["深圳"] }],
+      "allow_contains": ["周五", "三点"]
+    },
+    {
+      "id": "v06_event_deadline",
+      "goal": "交付节点",
+      "kind": "positive",
+      "turns": [{ "user": "这个季度末必须交付 v2.0，不能再拖了。", "assistant": "明白。" }],
+      "expect": [{ "contains": ["v2.0"] }],
+      "allow_contains": ["季度", "交付"]
+    },
+    {
+      "id": "v07_tech_stack",
+      "goal": "技术栈（两项）",
+      "kind": "positive",
+      "turns": [{ "user": "我们用 Rust 写服务端，前端是 SvelteKit。", "assistant": "好的。" }],
+      "expect": [{ "contains": ["rust"] }, { "contains": ["sveltekit"] }]
+    },
+    {
+      "id": "v08_numbers_budget",
+      "goal": "金额原样保留",
+      "kind": "positive",
+      "turns": [{ "user": "这次预算一共 3,600,000 元，超了要重新审批。", "assistant": "记下了。" }],
+      "expect": [{ "contains": ["3,600,000"] }]
+    },
+    {
+      "id": "v09_numbers_version",
+      "goal": "版本号与日期",
+      "kind": "positive",
+      "turns": [{ "user": "目标版本是 v3.2.1，9 月 30 日上线。", "assistant": "好的。" }],
+      "expect": [{ "contains": ["v3.2.1"] }],
+      "allow_contains": ["30", "上线"]
+    },
+    {
+      "id": "v10_mixed_lang",
+      "goal": "中英混合技术名",
+      "kind": "positive",
+      "turns": [{ "user": "部署在 Cloudflare Workers 上，数据库用 D1。", "assistant": "记下了。" }],
+      "expect": [{ "contains": ["cloudflare"] }, { "contains": ["d1"] }]
+    },
+    {
+      "id": "v11_neg_smalltalk",
+      "goal": "寒暄不记",
+      "kind": "negative",
+      "turns": [{ "user": "今天天气不错啊，出门走走。", "assistant": "是啊。" }],
+      "expect": []
+    },
+    {
+      "id": "v12_neg_query",
+      "goal": "一次性查询不记",
+      "kind": "negative",
+      "turns": [{ "user": "现在几点了？", "assistant": "十点半。" }],
+      "expect": []
+    },
+    {
+      "id": "v13_neg_joke",
+      "goal": "玩笑不记",
+      "kind": "negative",
+      "turns": [{ "user": "哈哈你可真逗，笑死我了。", "assistant": "嘿嘿。" }],
+      "expect": []
+    },
+    {
+      "id": "v14_neg_vague",
+      "goal": "指代不明不记",
+      "kind": "negative",
+      "turns": [{ "user": "那个东西你还记得吧，就是上次说的那个。", "assistant": "哪个？" }],
+      "expect": []
+    },
+    {
+      "id": "v15_neg_transient",
+      "goal": "临时请求不记",
+      "kind": "negative",
+      "turns": [{ "user": "帮我查一下明天的航班，谢谢。", "assistant": "好的。" }],
+      "expect": []
+    },
+    {
+      "id": "v16_secret_api",
+      "goal": "API key 不入库",
+      "kind": "negative",
+      "allow_any": true,
+      "turns": [{ "user": "我的 API key 是 sk-live-abcdef1234567890，帮我存一下。", "assistant": "这种我不会存。" }],
+      "expect": [],
+      "forbid_contains": ["sk-live"]
+    },
+    {
+      "id": "v17_secret_password",
+      "goal": "密码不入库",
+      "kind": "negative",
+      "allow_any": true,
+      "turns": [{ "user": "数据库密码是 P@ssw0rd2024，记住。", "assistant": "不能记。" }],
+      "expect": [],
+      "forbid_contains": ["p@ssw0rd"]
+    },
+    {
+      "id": "v18_correct_self",
+      "goal": "句中自我更正",
+      "kind": "positive",
+      "turns": [{ "user": "预算 30 万。不对，是 45 万。", "assistant": "以 45 万为准。" }],
+      "expect": [{ "contains": ["45"] }]
+    },
+    {
+      "id": "v19_correct_other",
+      "goal": "更正他人偏好，主体不变",
+      "kind": "transition",
+      "seed": [{ "key": "spouse_spice", "category": "preference", "content": "老婆不吃辣", "importance": 3 }],
+      "turns": [{ "user": "我老婆现在很能吃辣了，以前是我记错了。", "assistant": "已更正。" }],
+      "expect": [{ "contains": ["辣"], "subjectNotUser": true }],
+      "state_check": { "key": "spouse_spice", "must_be": "active_with", "contains": ["能吃辣"] }
+    },
+    {
+      "id": "v20_invalidate",
+      "goal": "习惯停止要作废",
+      "kind": "transition",
+      "seed": [{ "key": "morning_run", "category": "preference", "content": "每天早上晨跑五公里", "importance": 3 }],
+      "turns": [{ "user": "我晨跑已经彻底停了，膝盖不行。", "assistant": "记下了。" }],
+      "expect": [],
+      "state_check": { "key": "morning_run", "must_be": "invalidated" }
+    },
+    {
+      "id": "v21_restate",
+      "goal": "重复陈述不新增",
+      "kind": "negative",
+      "seed": [{ "key": "user_pet", "category": "fact", "content": "养了一只橘猫", "importance": 3 }],
+      "turns": [{ "user": "我还是养着那只橘猫，没变化。", "assistant": "明白。" }],
+      "expect": [],
+      "state_check": { "key": "user_pet", "must_be": "active_with", "contains": ["橘猫"] }
+    },
+    {
+      "id": "v22_multi_two_people",
+      "goal": "两个人各说各的",
+      "kind": "positive",
+      "turns": [
+        { "speaker": "王芳", "user": "我对青霉素过敏，病历上要写清楚。", "assistant": "记下了。" },
+        { "speaker": "赵磊", "user": "我戒烟已经一年了。", "assistant": "好的。" }
+      ],
+      "expect": [
+        { "contains": ["青霉素"], "subjectNotUser": true },
+        { "contains": ["烟"], "subjectNotUser": true }
+      ]
+    },
+    {
+      "id": "v23_multi_group",
+      "goal": "群体事件",
+      "kind": "positive",
+      "turns": [{ "user": "我们组下周三要去团建，地点还没定。", "assistant": "记下了。" }],
+      "expect": [{ "contains": ["团建"] }]
+    },
+    {
+      "id": "v24_hedge",
+      "goal": "含糊表述（抽取对、状态可能错）",
+      "kind": "positive",
+      "turns": [{ "user": "我可能在考虑换工作，还没定。", "assistant": "明白。" }],
+      "expect": [{ "contains": ["换工作"] }]
+    },
+    {
+      "id": "v25_paraphrase",
+      "goal": "不学助手自己说的话",
+      "kind": "negative",
+      "turns": [
+        { "user": "我们随便聊聊吧。", "assistant": "好的。顺便提醒：用户对花生严重过敏，这点很重要。" }
+      ],
+      "expect": []
+    },
+    {
+      "id": "v26_buried_fact",
+      "goal": "长句里埋的事实",
+      "kind": "positive",
+      "turns": [
+        {
+          "user": "今天真是累瘫了，上午三个会下午两个会，中间连水都没喝上。对了，下周二我要去杭州出差，晚上才能回来。",
+          "assistant": "辛苦了，杭州的行程记下了。"
+        }
+      ],
+      "expect": [{ "contains": ["杭州"] }],
+      "allow_contains": ["出差", "周二"]
+    },
+    {
+      "id": "v27_topic_mix",
+      "goal": "结论+偏好混在一句",
+      "kind": "positive",
+      "turns": [{ "user": "我先说结论：方案 A 更好。另外记住我特别不喜欢做 PPT。", "assistant": "记下了。" }],
+      "expect": [{ "category": "preference", "contains": ["ppt"] }]
+    },
+    {
+      "id": "v28_past_vs_future",
+      "goal": "地点变化只留最新",
+      "kind": "positive",
+      "turns": [{ "user": "去年我还在北京，今年搬到南京了。", "assistant": "记下了。" }],
+      "expect": [{ "contains": ["南京"] }]
+    },
+    {
+      "id": "v29_contradiction",
+      "goal": "自我矛盾取最后",
+      "kind": "positive",
+      "turns": [{ "user": "项目代号是 Falcon。等等，不是 Falcon，是 Eagle。", "assistant": "以 Eagle 为准。" }],
+      "expect": [{ "contains": ["eagle"] }]
+    },
+    {
+      "id": "v30_neg_empty",
+      "goal": "无内容不记",
+      "kind": "negative",
+      "turns": [{ "user": "嗯。", "assistant": "嗯？" }],
+      "expect": []
+    }
+  ]
+}

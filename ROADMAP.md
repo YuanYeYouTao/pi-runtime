@@ -167,6 +167,18 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > 明确边界：read 工具仍能读取用户可读的任何文件（包括 pi 自己的凭据文件），`readonly` 是唯一适合处理不可信任务的模式。
 
+## Phase 3.2 — 评测到"可对外报数" ✅
+
+- [x] `eval --repeat N`：报告 mean / min / max / range，逐次通过率
+- [x] 30 组新留出集 `eval/holdout-v3.json`（写完只跑一次）
+- [x] 结果：通过率 **87.8%**（83.3–93.3），precision 85.0%，recall 93.9%，凭据泄漏 **0**
+- [x] 结论写入 `eval/holdout-v3-results.md`
+- [ ] **系统缺陷 A**：证据没有约束"来源角色" —— 助手自己的复述被当成事实学习（v25，3/3 失败）
+- [ ] **系统缺陷 B**：`invalidate` 缺少 `target_fact_id` 时不会翻转状态，动作识别对但没落到具体行（v20，3/3 失败）
+- [ ] 修复 A/B 后需**新一组留出集**验收
+
+> 单次评测在这套用例上的噪声约 ±10 个百分点 —— 这就是必须跑多次的理由。
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）
