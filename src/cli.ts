@@ -23,6 +23,7 @@ import { exportMemoryToGit } from "./memory-git.ts";
 import { summarizeToolCalls, listMcpServers, formatToolReport } from "./tools-report.ts";
 import { buildSpanTree, formatSpanTree } from "./trace.ts";
 import { describePolicy } from "./sandbox.ts";
+import { OneBotClient, oneBotToIncoming, sendTargetFromChatId } from "./channels/onebot.ts";
 import { Gate } from "./gate.ts";
 import { buildDigest, buildSplitPrompt, canSpawn, parseSubtasks, runWithLimit } from "./subagent.ts";
 import type { ChildResult } from "./subagent.ts";
@@ -83,6 +84,7 @@ channels:
   node src/cli.ts serve --channel telegram    long-poll Telegram (needs TELEGRAM_BOT_TOKEN)
   node src/cli.ts serve --channel feishu      Feishu long connection (needs FEISHU_APP_ID/SECRET)
   node src/cli.ts serve --channel feishu-webhook [--port 8787]
+  node src/cli.ts serve --channel qq            OneBot v11 (NapCat / Lagrange)
                                              Feishu webhook mode (testable locally)
 
 env / config.json:
@@ -903,8 +905,8 @@ async function cmdFeed(args: string[]): Promise<number> {
 async function cmdServe(args: string[]): Promise<number> {
   const channel = flagValue(args, "--channel") ?? "telegram";
   const portFlag = flagValue(args, "--port");
-  if (channel !== "telegram" && channel !== "feishu" && channel !== "feishu-webhook") {
-    console.error(`channel "${channel}" is not implemented (available: telegram, feishu, feishu-webhook)`);
+  if (channel !== "telegram" && channel !== "feishu" && channel !== "feishu-webhook" && channel !== "qq") {
+    console.error(`channel "${channel}" is not implemented (available: telegram, feishu, feishu-webhook, qq)`);
     return 2;
   }
 
@@ -1011,6 +1013,28 @@ async function cmdServe(args: string[]): Promise<number> {
   process.on("SIGINT", () => controller.abort());
 
   try {
+    if (channel === "qq") {
+      // OneBot v11: a local protocol bridge (NapCat / Lagrange) owns the QQ login; this runtime
+      // only speaks its WebSocket in and HTTP out.
+      const client = new OneBotClient({
+        wsUrl: process.env.QQ_WS_URL ?? "ws://127.0.0.1:3001",
+        httpUrl: process.env.QQ_HTTP_URL ?? "http://127.0.0.1:3001",
+        accessToken: process.env.QQ_ACCESS_TOKEN,
+        botUin: process.env.QQ_BOT_UIN,
+        allowedUsers: process.env.QQ_ALLOW_USERS?.split(",").map((id) => id.trim()).filter(Boolean),
+        allowedGroups: process.env.QQ_ALLOW_GROUPS?.split(",").map((id) => id.trim()).filter(Boolean),
+      });
+      console.log(`qq (onebot) -> ${process.env.QQ_WS_URL ?? "ws://127.0.0.1:3001"} - ctrl+c to stop`);
+      await client.run(
+        (message) =>
+          handler(oneBotToIncoming(message) as Incoming, async (_chatId, text) => {
+            await client.send(sendTargetFromChatId(message.chatId), text);
+          }),
+        controller.signal,
+      );
+      return 0;
+    }
+
     if (channel === "telegram") {
       const token = process.env.TELEGRAM_BOT_TOKEN;
       if (!token) {
