@@ -1,9 +1,13 @@
+import path from "node:path";
 import { PiRpc } from "./rpc.ts";
 import type { RpcRecord } from "./rpc.ts";
 import type { Store, TaskRow } from "./db.ts";
 import type { MemoryStore } from "./memory.ts";
 import { buildConversationContext } from "./context.ts";
-import { ShortStateStore } from "./short-state.ts";
+import { compose } from "./compose.ts";
+import type { ComposeSegment } from "./compose.ts";
+import { ShortStateStore, parseTtl } from "./short-state.ts";
+import { extractStateDirectives } from "./state-directive.ts";
 import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
 import { withRetry } from "./retry.ts";
@@ -242,30 +246,66 @@ async function runAttempt(
       }
     }
 
-    const sections: string[] = [];
-    if (injected.text) sections.push(injected.text);
-
-    // Short state goes before long-term memory: it is newer, so on a key collision its value
-    // must be the one the model reads last.
+    // Short state is newer than long-term memory, so on a key collision its value is the one
+    // the model should end up reading (it is placed first in the prompt).
+    let shortStateBlock: { text: string; keys: string[] } = { text: "", keys: [] };
     {
       const shortState = new ShortStateStore(cfg.dataDir);
       try {
-        const block = shortState.contextBlock(300, task.thread);
-        if (block.text) {
-          sections.push(block.text);
-          store.appendEvent(task.id, "short_state_injected", { keys: block.keys, chars: block.text.length });
-          hooks.onStatus?.(`short state: ${block.keys.length} 条`);
-          shortState.markUsed(block.keys, task.thread);
+        shortStateBlock = shortState.contextBlock(300, task.thread);
+        if (shortStateBlock.text) {
+          store.appendEvent(task.id, "short_state_injected", {
+            keys: shortStateBlock.keys,
+            chars: shortStateBlock.text.length,
+          });
+          hooks.onStatus?.(`short state: ${shortStateBlock.keys.length} 条`);
+          shortState.markUsed(shortStateBlock.keys, task.thread);
         }
       } finally {
         shortState.close();
       }
     }
 
-    if (summary.trim()) sections.push(`## 更早对话的摘要（已压缩，因果细节以最近对话为准）\n${summary.trim()}`);
-    if (context.text) sections.push(`## 最近对话（同一会话，按时间顺序）\n${context.text}`);
-    sections.push(`## 当前消息\n${task.prompt}`);
-    const finalPrompt = sections.join("\n\n---\n\n");
+    // Order is the contract: instructions → memory → short state → summary → window → current.
+    const segments: ComposeSegment[] = [];
+    segments.push({
+      kind: "instructions",
+      title: "## 约定",
+      body: [
+        "需要跨轮记住的**临时**信息（端口、分支、待办链接、进度），在回复最后单独一行写：",
+        "<!--state: key=value; ttl=12h-->",
+        "不要用它记长期事实（那些交给记忆系统），也永远不要写入密码/密钥/token。",
+      ].join("\n"),
+    });
+    if (injected.text) segments.push({ kind: "memory", body: injected.text, meta: { ids: injected.ids } });
+    if (shortStateBlock.text) {
+      segments.push({ kind: "short_state", body: shortStateBlock.text, meta: { keys: shortStateBlock.keys } });
+    }
+    if (summary.trim()) {
+      segments.push({
+        kind: "summary",
+        title: "## 更早对话的摘要（已压缩，因果细节以最近对话为准）",
+        body: summary.trim(),
+      });
+    }
+    if (context.text) {
+      segments.push({
+        kind: "window",
+        title: "## 最近对话（同一会话，按时间顺序）",
+        body: context.text,
+        meta: { ids: context.ids, messages: context.messages },
+      });
+    }
+    segments.push({ kind: "current", title: "## 当前消息", body: task.prompt });
+
+    const { prompt: finalPrompt, manifest } = compose(segments, { budgetChars: cfg.contextBudgetChars });
+    store.appendEvent(task.id, "context_plan", manifest);
+
+    // Parity harness for refactors: dump the exact prompt so two runs can be diffed byte-wise.
+    if (process.env.PI_RT_PROMPT_DUMP) {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(path.join(cfg.dataDir, `prompt-${task.id}.txt`), finalPrompt, "utf8");
+    }
 
     rpc.start();
     hooks.onStatus?.(`pi pid=${(rpc as any).child?.pid ?? "?"} attempt=${attempt}`);
@@ -275,6 +315,35 @@ async function runAttempt(
     if (lastError) throw new Error(lastError);
     if (!transcript.trim()) {
       throw new Error("agent finished without producing text (check model credentials)");
+    }
+
+    // Control tokens are parsed here, not by a second model turn: the slot is written before
+    // the reply is stored, so "I remembered it" is true at the moment the user sees it.
+    const parsed = extractStateDirectives(transcript);
+    if (parsed.directives.length > 0) {
+      transcript = parsed.cleaned;
+      const shortState = new ShortStateStore(cfg.dataDir);
+      try {
+        for (const directive of parsed.directives) {
+          try {
+            const row = shortState.set(directive.key, directive.value, {
+              scope: task.thread,
+              ttlMs: directive.ttl ? parseTtl(directive.ttl) : undefined,
+              sourceEventId: lastId,
+            });
+            store.appendEvent(task.id, "state_directive", { key: row.key, ttl: directive.ttl ?? null, expires_at: row.expires_at });
+            hooks.onStatus?.(`state ← ${row.key}`);
+          } catch (error) {
+            store.appendEvent(task.id, "state_directive_rejected", {
+              key: directive.key,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+            hooks.onStatus?.(`state rejected: ${directive.key}`);
+          }
+        }
+      } finally {
+        shortState.close();
+      }
     }
 
     memory?.markUsed(injected.ids);

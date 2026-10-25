@@ -12,6 +12,7 @@ import { PiRpc } from "./rpc.ts";
 import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
+import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
 import { TelegramChannel } from "./channels/telegram.ts";
@@ -43,6 +44,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts state set <key> <value> [--ttl 12h] [--scope <thread>]
   node src/cli.ts state list [--scope <thread>]
   node src/cli.ts state prune                mark expired rows stale
+  node src/cli.ts state promote <key> [--category fact] [--as <memory-key>]
   node src/cli.ts state del <key> [--scope <thread>]
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
@@ -352,7 +354,8 @@ function cmdState(args: string[]): number {
         }
         for (const row of rows) {
           const hours = Math.max(0, Math.round((Date.parse(row.expires_at) - Date.now()) / 3_600_000));
-          console.log(`${row.key.padEnd(20)} = ${row.value.slice(0, 60).padEnd(40)} [${row.scope}]  ${hours}h left  used=${row.use_count}`);
+          const hint = row.use_count >= 3 ? "  ← 可晋升为长期记忆（state promote）" : "";
+          console.log(`${row.key.padEnd(20)} = ${row.value.slice(0, 60).padEnd(40)} [${row.scope}]  ${hours}h left  used=${row.use_count}${hint}`);
         }
         return 0;
       }
@@ -360,6 +363,23 @@ function cmdState(args: string[]): number {
         const pruned = store.prune();
         console.log(`marked ${pruned} row(s) stale`);
         return 0;
+      }
+      case "promote": {
+        const key = args[0];
+        if (!key) {
+          console.error("usage: node src/cli.ts state promote <key> [--category fact|preference|event] [--as <memory-key>] [--scope <thread>]");
+          return 2;
+        }
+        const category = (flagValue(args, "--category") ?? "fact") as MemoryCategory;
+        const memoryKey = flagValue(args, "--as");
+        const memory = openMemory();
+        try {
+          const result = promoteShortState(store, memory, key, { scope, category, memoryKey });
+          console.log(result.ok ? `${result.reason} → ${result.memoryKey}` : `failed: ${result.reason}`);
+          return result.ok ? 0 : 1;
+        } finally {
+          memory.close();
+        }
       }
       case "del":
       case "rm": {

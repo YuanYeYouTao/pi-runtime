@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import { detectSecret, isSensitiveName } from "./secrets.ts";
 
 export type ShortStateRow = {
   key: string;
@@ -80,6 +81,13 @@ export class ShortStateStore {
       throw new Error(`key 不合法：${key}（小写字母/数字/._:-，最长 64）`);
     }
     if (!value.trim()) throw new Error("value 不能为空");
+
+    // Short state is injected into prompts, so it is held to the same standard as memory:
+    // a credential must not live here either. The name check catches bare values that no
+    // pattern could recognise (e.g. `db_password = Passw0rd!2024`).
+    if (isSensitiveName(normalized) || detectSecret(value).sensitive) {
+      throw new Error(`拒绝写入：${normalized} 看起来是凭据，短状态同样不保存密钥`);
+    }
 
     const scope = (options.scope ?? GLOBAL_SCOPE).trim() || GLOBAL_SCOPE;
     const ttl = Math.min(MAX_TTL_MS, Math.max(MIN_TTL_MS, options.ttlMs ?? DEFAULT_TTL_MS));

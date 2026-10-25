@@ -473,6 +473,60 @@ cautious about technical identifiers. Documented rather than tuned away.
 contains a password still sits verbatim in `conversation_events`; redacting at ingest is the
 next step, and it needs its own decision about how much of the original to keep.
 
+### Short state
+
+Long-term memory answers "what is true about this person"; short state answers "what are we in
+the middle of". Ports, branches, pending links and task progress must survive turns without
+becoming permanent beliefs — a different mechanism, not a different category of memory.
+
+| | long-term memory | short state |
+|---|---|---|
+| addressed by | subject + key, injected by scope | key, hit directly |
+| lifetime | permanent, decays by category | explicit TTL (1 min – 30 d) |
+| write | batched, asynchronous | **synchronous** |
+| on conflict | four-way verdict | newest value wins |
+
+The synchronous write is the point: "I remembered it" must be true when it is said, which an
+asynchronous distiller cannot promise.
+
+```bash
+pi-rt state set deploy_port 8080 --ttl 7d
+pi-rt state list                      # shows remaining hours and a promotion hint
+pi-rt state promote deploy_port --category fact   # slot → memory, slot removed
+```
+
+The agent can write slots itself with a control token, parsed on our side rather than through a
+second model turn:
+
+```
+<!--state: debug_port=8899; ttl=7d-->
+```
+
+The token is stripped before the reply is stored or sent, so the user never sees it. Verified:
+the agent emitted it for "把端口 8899 记成临时状态", the slot appeared with 168h remaining, and
+the visible reply was just "已记下调试端口 8899，有效期 7 天。"
+
+Guard: slots are held to the same standard as memory. A credential-shaped **name**
+(`db_password`) or value is refused on write, because the slot is injected into prompts too.
+
+## Context composition
+
+The prompt is now assembled by `src/compose.ts`, a pure function that renders segments and
+returns a manifest. P1 changed no behaviour: the pre- and post-refactor prompts were diffed
+byte-for-byte and were identical (485 chars).
+
+Every run records `context_plan`:
+
+```json
+{"budgetChars":4000,"usedChars":486,"estimatedTokens":139,"charsPerToken":3.5,
+ "segments":[{"kind":"instructions","chars":86},{"kind":"memory","chars":290,"meta":{"ids":[31,30,29,5,4,3]}},
+             {"kind":"short_state","chars":165,"meta":{"keys":["hotfix_branch","deploy_port"]}},
+             {"kind":"current","chars":17}],"skipped":[]}
+```
+
+The full plan (budgets, dedupe, conflict resolution, evals) is in
+[docs/context-composition.md](docs/context-composition.md); only P1 is implemented so far.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

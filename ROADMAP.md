@@ -87,6 +87,27 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > "一次 429 会发生什么？预算怎么不失控？"
 
+## Phase 2.7 — 短状态与上下文编排（P1）✅
+
+**短状态**
+- [x] `short_state` 表（partial unique index + 惰性过期 + 软删除为 stale）
+- [x] 同步写：`state set` 返回即落库（与异步蒸馏的长期记忆刻意不同）
+- [x] 作用域：`global` 对所有线程可见，线程 key 只在本线程
+- [x] 注入：排在长期记忆之前，每行带剩余时间
+- [x] 晋升：`state promote` → 长期记忆，原名保留可追溯；`use_count≥3` 时列表提示
+- [x] 守卫：凭据形态的 key 或 value 一律拒写（短状态同样进 prompt）
+- [x] agent 自写：控制标记 `<!--state: k=v; ttl=7d-->`，服务端解析并剥离，不暴露给用户
+- [x] 实测：agent 自主写入 `debug_port=8899`（168h）、回复无标记、晋升链路通
+- [ ] 异步 `serve` 模式的闲置提炼（短状态已有，长期记忆还没有）
+
+**上下文编排 P1**
+- [x] `src/compose.ts` 纯函数：按段渲染 + 输出 manifest
+- [x] **零行为变化**：重构前后 prompt 逐字 diff，485 字符完全一致
+- [x] `context_plan` 事件：每段的字符数、meta、skipped、token 估算
+- [ ] P2 段预算 / 淘汰顺序 / 跨段去重 · P3 冲突裁决 / token 校准 · P4 检索段
+
+> "它为什么答错了？" —— 看 `context_plan`。
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）

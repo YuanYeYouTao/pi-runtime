@@ -59,6 +59,13 @@ export function redact(text: string): string {
     .replace(/((?:密码|口令|密钥|私钥|令牌|password|passwd|pwd|secret|token)\s*(?:是|为|:|：|=)\s*)[\S]{4,}/gi, "$1***");
 }
 
+/** A slot whose *name* says credential, even when the value looks ordinary. */
+const SENSITIVE_NAME = /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|pin\b)/i;
+
+export function isSensitiveName(name: string): boolean {
+  return SENSITIVE_NAME.test(name ?? "");
+}
+
 export function detectSecret(text: string): SecretFinding {
   const reasons: string[] = [];
   const value = text ?? "";
