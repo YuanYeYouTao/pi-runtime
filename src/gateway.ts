@@ -10,6 +10,12 @@ export type Incoming = {
   text: string;
   messageId?: string;
   timestamp?: string;
+  /**
+   * Whether the message was actually addressed to the bot. In a group, every message arrives —
+   * answering all of them costs money and is annoying, so the handler stays quiet unless the bot
+   * was mentioned. DMs are always addressed.
+   */
+  addressed?: boolean;
 };
 
 export type GatewayDeps = {

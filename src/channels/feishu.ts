@@ -25,6 +25,7 @@ export class FeishuChannel {
   private readonly client: Lark.Client;
   private ws?: Lark.WSClient;
   private readonly names = new Map<string, string>();
+  private botOpenId: string | undefined;
 
   constructor(options: FeishuOptions) {
     this.options = options;
@@ -65,13 +66,33 @@ export class FeishuChannel {
     return name;
   }
 
+  /** The bot's own open_id, needed to tell "mentioned me" from "mentioned someone else". */
+  async resolveBotOpenId(): Promise<string | undefined> {
+    if (this.botOpenId !== undefined) return this.botOpenId;
+    // Explicit config wins: it removes a startup dependency on the bot-info API, so group
+    // mention detection keeps working even if that call is rate limited or scoped out.
+    const configured = (process.env.FEISHU_BOT_OPEN_ID ?? "").trim();
+    if (configured) {
+      this.botOpenId = configured;
+      return this.botOpenId;
+    }
+    try {
+      const response: any = await this.client.request({ method: "POST", url: "/open-apis/bot/v3/info" });
+      this.botOpenId = response?.bot?.open_id ?? response?.data?.bot?.open_id;
+    } catch {
+      this.botOpenId = undefined;
+    }
+    return this.botOpenId;
+  }
+
   async serve(onMessage: (message: Incoming) => Promise<void>): Promise<void> {
+    const botOpenId = await this.resolveBotOpenId();
     const dispatcher = new Lark.EventDispatcher({
       encryptKey: this.options.encryptKey,
       verificationToken: this.options.verificationToken,
     }).register({
       "im.message.receive_v1": async (payload: any) => {
-        const base = parseFeishuMessage(payload);
+        const base = parseFeishuMessage(payload, { botOpenId });
         if (!base) return;
         if (this.options.allowedChats?.length && !this.options.allowedChats.includes(base.chatId)) {
           console.error(`ignoring feishu chat ${base.chatId} (not in allow list)`);
@@ -106,7 +127,7 @@ export class FeishuChannel {
  * Normalization is exported so it can be tested without credentials: the payload shape is
  * the part that breaks when Feishu changes schema or when a message is not plain text.
  */
-export function parseFeishuMessage(payload: any): Incoming | null {  const event = payload?.event ?? payload;
+export function parseFeishuMessage(payload: any, options: { botOpenId?: string } = {}): Incoming | null {  const event = payload?.event ?? payload;
   const message = event?.message;
   const sender = event?.sender;
   if (!message?.chat_id || typeof message.content !== "string") return null;
@@ -126,10 +147,19 @@ export function parseFeishuMessage(payload: any): Incoming | null {  const event
   const externalId = String(ids.open_id ?? ids.user_id ?? ids.union_id ?? "unknown");
   if (externalId === "unknown") return null;
 
+  const chatType = message.chat_type === "p2p" ? "dm" : "group";
+  // Feishu puts mentioned users in `mentions`; the bot is addressed when its own open_id is
+  // among them. Without the bot id we cannot tell, so a group message stays unanswered.
+  const mentioned = Array.isArray(message.mentions)
+    ? message.mentions.map((item: any) => String(item?.id?.open_id ?? "")).filter(Boolean)
+    : [];
+  const addressed = chatType === "dm" || (Boolean(options.botOpenId) && mentioned.includes(options.botOpenId!));
+
   return {
     channel: "feishu",
     chatId: String(message.chat_id),
-    chatType: message.chat_type === "p2p" ? "dm" : "group",
+    chatType,
+    addressed,
     externalId,
     displayName: externalId,
     text,

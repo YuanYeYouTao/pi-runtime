@@ -921,6 +921,12 @@ async function cmdServe(args: string[]): Promise<number> {
 
   // One handler for every transport: identity → event → run → reply → maybe distil.
   const handler = async (message: Incoming, send: (chatId: string, text: string) => Promise<void>) => {
+    // In a group, every message reaches us. Answering all of them is noisy and expensive, so we
+    // stay quiet unless the bot was mentioned (DMs are always addressed).
+    if (message.chatType === "group" && message.addressed === false) {
+      dim(`群消息未 @ 我，跳过：${message.text.slice(0, 20)}`);
+      return;
+    }
     const result = ingest(deps, message);
     if (result.duplicate) {
       dim(`duplicate message ${message.messageId} ignored`);
