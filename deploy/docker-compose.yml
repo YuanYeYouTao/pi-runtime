@@ -1,0 +1,31 @@
+# Single-instance by design: SQLite plus one long-lived WebSocket connection.
+# Do not scale this service horizontally — two replicas would open two Feishu connections and
+# write to two different SQLite files.
+services:
+  pi-rt:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: pi-runtime:latest
+    container_name: pi-rt
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - /srv/pi-rt/data:/data
+      - /srv/pi-rt/workspace:/workspace
+    # The image is immutable; only the two volumes are writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    memswap_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
