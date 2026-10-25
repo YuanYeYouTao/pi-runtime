@@ -62,7 +62,8 @@ const check = (name, ok, extra = "") => {
   const root = path.parse(process.cwd()).root;
   check("rejects drive root", checkWorkspace(root).ok === false, root);
   check("rejects the home directory", checkWorkspace(os.homedir()).ok === false, os.homedir());
-  check("rejects a single segment", checkWorkspace(path.join(root, "Users")).ok === false);
+  check("allows a mount point like /workspace", checkWorkspace(path.join(root, "workspace")).ok === true);
+  check("rejects system directories", ["etc", "usr", "var", "root", "home"].every((dir) => checkWorkspace(path.join(root, dir)).ok === false));
   check("accepts a project directory", checkWorkspace(process.cwd()).ok === true, process.cwd());
   check("accepts a nested path", checkWorkspace(path.join(root, "a", "b", "c")).ok === true);
 }

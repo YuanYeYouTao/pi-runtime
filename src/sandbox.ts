@@ -123,8 +123,21 @@ export function checkWorkspace(workspace: string): WorkspaceVerdict {
   if (resolved === parsed.root) return { ok: false, reason: `工作区不能是磁盘根目录：${resolved}` };
   if (resolved.toLowerCase() === home.toLowerCase()) return { ok: false, reason: `工作区不能是用户主目录：${resolved}` };
 
+  // A mount point like /workspace is a single segment and is perfectly safe; what must be
+  // refused is a *system* directory, where a stray write breaks the machine. The earlier
+  // "at least two segments" rule was a proxy that got this exactly backwards.
   const segments = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
-  if (segments.length < 2) return { ok: false, reason: `工作区太靠近根目录（至少两层）：${resolved}` };
+  if (segments.length === 0) return { ok: false, reason: `工作区不能是根目录：${resolved}` };
+
+  const first = segments[0].toLowerCase();
+  const systemDirs = new Set([
+    "etc", "usr", "bin", "sbin", "lib", "lib32", "lib64", "boot", "dev", "proc", "sys",
+    "var", "root", "home", "opt", "run",
+    "windows", "program files", "program files (x86)", "programdata", "system32",
+  ]);
+  if (systemDirs.has(first)) {
+    return { ok: false, reason: `工作区不能是系统目录：${resolved}` };
+  }
 
   return { ok: true };
 }
