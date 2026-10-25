@@ -12,6 +12,7 @@ import { PiRpc } from "./rpc.ts";
 import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
+import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -46,6 +47,7 @@ short state (临时状态，按 key 命中，带 TTL):
   node src/cli.ts state prune                mark expired rows stale
   node src/cli.ts state promote <key> [--category fact] [--as <memory-key>]
   node src/cli.ts state del <key> [--scope <thread>]
+  node src/cli.ts calibrate [--backfill] [--reset]   token 估算校准
   node src/cli.ts resolve <key> <keep-id>    adjudicate a contested slot
   node src/cli.ts forget <id>
   node src/cli.ts distill [--thread t] [--limit n]
@@ -322,6 +324,40 @@ function cmdResolve(args: string[]): number {
   memory.close();
   console.log(ok ? `resolved ${key}: kept #${keepId}, others superseded` : `no contested rows to resolve for ${key} (or #${keepId} not among them)`);
   return ok ? 0 : 1;
+}
+
+function cmdCalibrate(args: string[]): number {
+  const backfill = args.includes("--backfill");
+  const reset = args.includes("--reset");
+  const store = new CalibrationStore(DATA_DIR);
+  try {
+    if (reset) {
+      console.log(`cleared ${store.reset()} sample(s)`);
+      return 0;
+    }
+    if (backfill) {
+      console.log(`backfilled ${store.backfill()} sample(s) from history`);
+    }
+
+    const samples = store.samples();
+    const fit = store.fit();
+    console.log(`samples      ${samples.length}  (fit needs ${MIN_SAMPLES})`);
+    if (samples.length > 0) {
+      const ratios = samples.slice(0, 5).map((s) => (s.chars > 0 ? (s.tokens / s.chars).toFixed(2) : "-"));
+      console.log(`last ratios  ${ratios.join(", ")}  (tokens/char, raw — inflated by pi overhead)`);
+    }
+    if (fit) {
+      console.log(`slope        ${fit.slope.toFixed(4)} tokens/char`);
+      console.log(`intercept    ${fit.intercept.toFixed(0)} tokens  (pi system prompt + tool schemas)`);
+      console.log(`r2           ${fit.r2.toFixed(3)}${fit.r2 < 0.5 ? "  ← 拟合质量差，谨慎使用" : ""}`);
+      console.log(`estimate     ${charsPerTokenFrom(fit)} chars/token  ← 用于 compose`);
+    } else {
+      console.log(`estimate     ${DEFAULT_CHARS_PER_TOKEN} chars/token  (default: 样本不足或斜率不可辨识)`);
+    }
+    return 0;
+  } finally {
+    store.close();
+  }
 }
 
 function cmdState(args: string[]): number {
@@ -823,6 +859,8 @@ async function main(): Promise<number> {
       return cmdThread(rest);
     case "state":
       return cmdState(rest);
+    case "calibrate":
+      return cmdCalibrate(rest);
     case "resolve":
       return cmdResolve(rest);
     case "forget":

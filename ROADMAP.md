@@ -110,7 +110,12 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
   - 跨段去重：window > short_state > memory > summary，比较前剥掉 `- [事实·4]` / `[Rick]` 前缀
   - manifest 增加 floor/cap/truncated/droppedChars/evictions/dedup/overBudget
   - 实盘：记忆里与短状态重复的一行被丢（similarity 0.73），311→258 字符
-- [ ] P3 冲突裁决 / token 校准 · P4 检索段
+- [x] **P3-a token 校准**：`tokens ≈ slope × chars + intercept`（带截距的最小二乘）
+  - 为什么必须带截距：provider 的 `input` 包含 pi 自己的系统提示与工具 schema
+  - 少于 8 个样本不启用；报告 `r2`，差的时候显式警告
+  - `pi-rt calibrate [--backfill] [--reset]`，从 `usage.input ⨝ context_plan.usedChars` 回填
+  - 实测：8 样本 → slope 0.3259、intercept 115、r2 0.692 → 3.07 chars/token（默认 3.5 低估约 12%）
+- [ ] P3-b 冲突裁决 / P4 检索段
 
 > "它为什么答错了？" —— 看 `context_plan`。
 

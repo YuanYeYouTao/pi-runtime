@@ -561,6 +561,44 @@ The manifest reports per-segment `floor`/`cap`/`truncated`/`droppedChars`, plus
 Remaining from [docs/context-composition.md](docs/context-composition.md): P3 (conflict
 resolution, token calibration) and P4 (retrieval segment).
 
+### Token calibration
+
+Estimating tokens as `chars / 3.5` is a guess. The provider reports real usage, so the ratio is
+learned instead of assumed — with one subtlety that changes the answer:
+
+**provider `input` is not our prompt.** pi sends its own system prompt and tool schemas, so the
+count includes a fixed overhead. Dividing tokens by characters (no intercept) inflates the
+ratio; the honest model is a line:
+
+```
+provider_input_tokens ≈ slope × our_prompt_chars + intercept
+```
+
+`src/calibration.ts` fits that line with least squares, requires **8 samples** before trusting
+it, and reports `r2` so a bad fit is visible. Below the threshold it falls back to 3.5.
+
+```bash
+pi-rt calibrate --backfill   # recover samples from usage.input ⨝ context_plan.usedChars
+pi-rt calibrate              # show slope, intercept, r2, resulting chars/token
+```
+
+Current fit on this machine:
+
+```
+samples      8
+slope        0.3259 tokens/char
+intercept    115 tokens      (pi system prompt + tool schemas)
+r2           0.692
+estimate     3.07 chars/token
+```
+
+Two things fall out of that:
+
+- The default 3.5 **underestimated** by about 12 % for Chinese-heavy prompts (3.07 chars/token
+  means more tokens per character).
+- `r2 = 0.69` says the fit is usable but noisy — the manifest records the ratio it used
+  (`charsPerToken`) so a bad estimate is traceable rather than invisible.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

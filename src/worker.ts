@@ -7,6 +7,7 @@ import { buildConversationContext } from "./context.ts";
 import { compose } from "./compose.ts";
 import type { ComposeSegment } from "./compose.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
+import { CalibrationStore } from "./calibration.ts";
 import { extractStateDirectives } from "./state-directive.ts";
 import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
@@ -152,6 +153,7 @@ async function runAttempt(
   let lastError: string | null = null;
   let usage: Usage | null = null;
   let budgetTripped = false;
+  let promptChars = 0;
 
   rpc.on("record", (record: RpcRecord) => {
     store.appendEvent(task.id, record.type, record);
@@ -298,7 +300,21 @@ async function runAttempt(
     }
     segments.push({ kind: "current", title: "## 当前消息", body: task.prompt });
 
-    const { prompt: finalPrompt, manifest } = compose(segments, { budgetChars: cfg.contextBudgetChars });
+    // The ratio is learned from provider-reported usage, falling back to the default until
+    // there are enough samples to fit.
+    const calibration = new CalibrationStore(cfg.dataDir);
+    let charsPerToken = 3.5;
+    try {
+      charsPerToken = calibration.charsPerToken();
+    } finally {
+      calibration.close();
+    }
+
+    const { prompt: finalPrompt, manifest } = compose(segments, {
+      budgetChars: cfg.contextBudgetChars,
+      charsPerToken,
+    });
+    promptChars = finalPrompt.length;
     store.appendEvent(task.id, "context_plan", manifest);
 
     // Parity harness for refactors: dump the exact prompt so two runs can be diffed byte-wise.
@@ -360,6 +376,14 @@ async function runAttempt(
     if (usage) {
       store.recordUsage(task.id, cfg.model ?? "default", usage);
       store.appendEvent(task.id, "usage", usage);
+      if (promptChars > 0 && Number(usage.input ?? 0) > 0) {
+        const calibration = new CalibrationStore(cfg.dataDir);
+        try {
+          calibration.record({ chars: promptChars, tokens: Number(usage.input), taskId: task.id });
+        } finally {
+          calibration.close();
+        }
+      }
     }
     await rpc.dispose();
   }
