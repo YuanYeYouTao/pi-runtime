@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import { detectSecret } from "./secrets.ts";
 
 export type MemoryCategory = "preference" | "fact" | "event";
 export type MemoryAction = "create" | "correct" | "invalidate" | "contest";
@@ -255,6 +256,22 @@ export class MemoryStore {
     let key = write.key.trim().toLowerCase();
     if (!key) return { id: null, action: "rejected", key: write.key, reason: "empty key" };
     if (!write.content.trim()) return { id: null, action: "rejected", key, reason: "empty content" };
+
+    // Credentials are refused at the write boundary, not in the prompt: a memory row is
+    // injected into every later prompt, rendered into MEMORY.md and persisted, so a single
+    // slip turns a pasted password into a plaintext that travels. Checked before any DB write.
+    const secretContent = detectSecret(write.content);
+    const secretEvidence = write.evidenceQuote ? detectSecret(write.evidenceQuote) : { sensitive: false, reasons: [] };
+    if (secretContent.sensitive || secretEvidence.sensitive) {
+      const reasons = [...new Set([...secretContent.reasons, ...secretEvidence.reasons])].join(",");
+      return {
+        id: null,
+        action: "rejected",
+        key,
+        reason: `sensitive: ${reasons} — 凭据类信息不入记忆`,
+        content: null,
+      };
+    }
 
     const targetType: TargetType = TARGETS.includes(write.targetType as TargetType)
       ? (write.targetType as TargetType)

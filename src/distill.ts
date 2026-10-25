@@ -2,6 +2,7 @@ import { PI_CLI, piArgs, piEnv } from "./config.ts";
 import type { RuntimeConfig } from "./config.ts";
 import { PiRpc } from "./rpc.ts";
 import { normalize } from "./memory.ts";
+import { redact } from "./secrets.ts";
 import type { ApplyResult, MemoryAction, MemoryCategory, MemoryStore, TargetType } from "./memory.ts";
 import type { ConversationEventRow, Store } from "./db.ts";
 
@@ -34,7 +35,9 @@ const SYSTEM_PROMPT = `你是记忆提取与知识沉淀引擎。输入是一段
 
 # 过滤原则
 1. 坚决不记：临时寒暄、一次性查询、玩笑与推测、短暂情绪宣泄。
-2. 重点记录：长期稳定的客观事实；明确且持久的个人偏好；重要的事件与长期承诺。
+2. 凭据类信息（密码、密钥、token、私钥、银行卡号、支付密码）一律不记 —— 即使用户明确要求记住，
+   也不要保存具体值；最多记「用户有某类凭据」这种不含值的元信息。
+3. 重点记录：长期稳定的客观事实；明确且持久的个人偏好；重要的事件与长期承诺。
 
 # 约束一：证据必须绑定事件
 - 每条记忆必须给出 evidence_event_id，就是支持它的那条消息的编号。
@@ -200,23 +203,35 @@ export async function distillBatch(
       targetName = speaker;
     }
 
-    applied.push(
-      memory.apply({
-        action: item.action,
-        targetType,
-        targetName,
-        category: item.category,
-        key: String(item.key),
-        content: String(item.content).trim(),
-        importance: Number(item.importance),
-        evidenceEventId: Number(item.evidence_event_id),
-        evidenceQuote: String(item.evidence_quote),
-        reason: typeof item.reason === "string" ? item.reason : null,
-        targetFactId: typeof item.target_fact_id === "number" ? item.target_fact_id : null,
-        sourceTaskId: events[events.length - 1]?.task_id ?? null,
-        thread: events[events.length - 1]?.thread ?? null,
-      }),
-    );
+    const outcome = memory.apply({
+      action: item.action,
+      targetType,
+      targetName,
+      category: item.category,
+      key: String(item.key),
+      content: String(item.content).trim(),
+      importance: Number(item.importance),
+      evidenceEventId: Number(item.evidence_event_id),
+      evidenceQuote: String(item.evidence_quote),
+      reason: typeof item.reason === "string" ? item.reason : null,
+      targetFactId: typeof item.target_fact_id === "number" ? item.target_fact_id : null,
+      sourceTaskId: events[events.length - 1]?.task_id ?? null,
+      thread: events[events.length - 1]?.thread ?? null,
+    });
+
+    // A credential that passed the prompt and was stopped by the store is worth an audit row:
+    // "the engine tried to remember a password" is a security signal, not a silent no-op.
+    if (outcome.action === "rejected" && outcome.reason.startsWith("sensitive")) {
+      store.appendEvent(events[events.length - 1]?.task_id ?? "unknown", "memory_blocked", {
+        key: outcome.key,
+        reasons: outcome.reason,
+        preview: redact(String(item.content ?? "")).slice(0, 80),
+      });
+      rejected.push({ item, why: outcome.reason });
+      continue;
+    }
+
+    applied.push(outcome);
   }
 
   store.markEventsDistilled(events.map((event) => event.id));

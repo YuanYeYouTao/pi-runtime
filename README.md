@@ -435,6 +435,44 @@ engine treats a credential exactly like a preference.
 Discipline note: this set is now burned for `h01`. A fix must be validated against a **new**
 held-out set, otherwise "we fixed it" is just fitting the test.
 
+### Secret guard
+
+The held-out run found the worst possible failure: a pasted password was stored as a
+preference — and therefore injected into every later prompt, rendered into `MEMORY.md` and
+persisted in SQLite. `src/secrets.ts` now refuses credentials **at the write boundary**
+(`MemoryStore.apply`), not in the prompt.
+
+| blocked | why |
+|---|---|
+| `密码是 <value>` / `password: <value>` | keyword + separator + a value-shaped token |
+| `sk-…`, `ghp_…`, `gho_…`, `xox*-…`, `AKIA…`, `AIza…` | provider token prefixes |
+| `Bearer <token>`, `-----BEGIN … PRIVATE KEY-----` | auth headers, key blocks |
+| 28+ char token with ≥3 character classes | generated-looking strings |
+| 银行卡 / 支付密码 + 6+ digits | card numbers and PINs |
+
+False positives are the other failure mode: "我的密码策略是 90 天改一次" must be stored, and
+a system that blocks it becomes annoying enough to be turned off. So assignment patterns
+require an actual value after the keyword, UUIDs and hex digests are excluded from the
+entropy rule, and `tests/secrets.test.mjs` pins 9 must-block and 7 must-allow shapes.
+
+Enforcement is code, not vibes: the prompt also says "credentials are never remembered", but a
+prompt can be argued with. A blocked write leaves a `memory_blocked` audit event with a
+**redacted** preview, so "the engine tried to remember a password" is visible without storing it.
+
+Held-out validation (`eval/holdout-secrets.json`, run once):
+
+```
+9/10 pass · 值泄漏 0 例 · FP 0 · 证据被拒 1
+```
+
+The single failure is the over-correction: a benign `sha256` digest was **not** recorded.
+That is the real trade-off of this guard — tightening detection also makes the model more
+cautious about technical identifiers. Documented rather than tuned away.
+
+**Known limitation:** the guard covers memory rows, not the raw event log. A message that
+contains a password still sits verbatim in `conversation_events`; redacting at ingest is the
+next step, and it needs its own decision about how much of the original to keep.
+
 ## Evaluation
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.

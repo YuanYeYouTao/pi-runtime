@@ -23,6 +23,8 @@ type EvalCase = {
   seed?: Array<{ key: string; category: MemoryCategory; content: string; importance?: number }>;
   turns: Array<{ user: string; assistant: string; speaker?: string }>;
   expect: CaseExpect[];
+  /** Credential cases: any stored metadata is fine, only forbid_contains is enforced. */
+  allow_any?: boolean;
   allow_contains?: string[];
   forbid_contains?: string[];
   state_check?: {
@@ -46,6 +48,7 @@ type CaseOutcome = {
   rejected: number;
   categoryOk: number;
   categoryTotal: number;
+  leak: boolean;
   fpDetail: string[];
   stateCheck: boolean | null;
   ms: number;
@@ -221,6 +224,10 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
 
       for (const item of applied) {
         if (forbiddenHits.has(item)) continue;
+        // Credential cases assert one thing only: the value must not appear. What metadata
+        // the model chooses to keep ("持有某类凭据") is wording, not behaviour, and asserting
+        // on wording makes the case fail on synonyms.
+        if (testCase.allow_any) continue;
         const row = rowOf(item.id);
         const content = normalize(item.content ?? row?.content ?? "");
         if (testCase.expect.some((expect) => matches(item, expect, stateKey, row as any, cfg.ownerName))) continue;
@@ -244,6 +251,7 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
         rejected: result.rejected.length,
         categoryOk,
         categoryTotal,
+        leak: forbiddenHits.size > 0,
         fpDetail,
         stateCheck,
         ms,
@@ -263,6 +271,7 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
         rejected: 0,
         categoryOk: 0,
         categoryTotal: 0,
+        leak: false,
         fpDetail: [`ERROR ${error instanceof Error ? error.message : String(error)}`],
         stateCheck: null,
         ms: Date.now() - started,
@@ -297,6 +306,7 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
   const transitionStateOk = outcomes.filter((item) => item.stateCheck === true).length;
   const categoryOk = total((item) => item.categoryOk);
   const categoryTotal = total((item) => item.categoryTotal);
+  const leaks = outcomes.filter((item) => item.leak).length;
 
   const precision = truePositives + falsePositives === 0 ? 1 : truePositives / (truePositives + falsePositives);
   const recall = expected === 0 ? 1 : truePositives / expected;
@@ -322,6 +332,7 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
       transitionCases,
       transitionStateOk,
       categoryAgreement: categoryTotal === 0 ? 1 : categoryOk / categoryTotal,
+      leaks,
       evidenceRejectionRate,
       passRate: outcomes.filter((item) => item.pass).length / (outcomes.length || 1),
     },
@@ -337,6 +348,7 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
   console.log(`不该记的泄漏       ${negativeLeaks}/${negativeCases} 个负例`);
   console.log(`状态迁移正确       ${transitionStateOk}/${transitionCases}`);
   console.log(`类别一致率(软)     ${pct(categoryTotal === 0 ? 1 : categoryOk / categoryTotal)}  (${categoryOk}/${categoryTotal})`);
+  console.log(`值泄漏（红线）     ${leaks} 例`);
   console.log(`证据被拒率         ${pct(evidenceRejectionRate)}  (${rejected} 条疑似脑补)`);
   console.log(`用例通过率         ${pct(report.metrics.passRate)}  (${outcomes.filter((i) => i.pass).length}/${outcomes.length})`);
 
@@ -365,6 +377,7 @@ export async function runEval(options: { casesPath?: string; keep?: boolean; onl
     `| 状态迁移正确 | ${transitionStateOk}/${transitionCases} |`,
     `| 类别一致率（软指标，不参与通过判定） | ${pct(categoryTotal === 0 ? 1 : categoryOk / categoryTotal)} (${categoryOk}/${categoryTotal}) |`,
     `| 证据被拒率 | ${pct(evidenceRejectionRate)} (${rejected} 条) |`,
+    `| 值泄漏（红线） | ${leaks} 例 |`,
     `| 用例通过率 | ${pct(report.metrics.passRate)} |`,
     "",
     "## 用例明细",

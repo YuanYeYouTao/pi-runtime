@@ -116,7 +116,13 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 - [x] 留出集（hold-out）：`eval/holdout.json`，10 组写完只跑一次 → **9/10**
   - 唯一失败：`h01_secret`——把数据库密码当普通偏好存了（无敏感信息过滤）
   - 该组已因 h01 报销，修复必须在**新的**留出集上验证
-- [ ] 敏感信息守卫：凭据/密钥/token 不入库，或入库前脱敏（需要新留出集验收）
+- [x] 敏感信息守卫：`src/secrets.ts`，在写入边界拒绝（不靠提示词）
+  - 拦截：关键字+值、供应商 token 前缀、Bearer、私钥块、高熵串、卡号/PIN
+  - 误报控制：策略陈述放行、UUID/hex 摘要排除；9 拦 7 放的单元测试
+  - 审计：被拦时写 `memory_blocked` 事件（内容为**脱敏预览**）
+  - 新留出集 `eval/holdout-secrets.json` 一次运行：**9/10，值泄漏 0，FP 0**
+  - 唯一失败是过保守：无害的 sha256 摘要没被记（记录为权衡，不调参）
+- [ ] 事件层脱敏：原始消息仍明文存在 `conversation_events`（守卫只覆盖记忆行）
 - [ ] 多次运行取均值：单次跑已观察到 26/28 ~ 28/28 的抖动，报告应写均值与区间
 - [ ] `correct` vs `invalidate` 判定不稳：同一句"晨跑彻底停了"，两次运行分别给出 correct 与 invalidate（后者正确）。需要更强的不变量或二次确认
 - [ ] 回归自动化：每次改 prompt 自动跑并记录指标变化曲线
