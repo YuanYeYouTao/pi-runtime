@@ -14,6 +14,7 @@ import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
 import { NOISE_TYPES } from "./event-log.ts";
+import { runMaintenance } from "./maintenance.ts";
 import { promoteShortState } from "./promote.ts";
 import { ingest } from "./gateway.ts";
 import type { Incoming } from "./gateway.ts";
@@ -637,6 +638,10 @@ async function cmdServe(args: string[]): Promise<number> {
   const memory = openMemory();
   const deps = { store, members, dataDir: DATA_DIR, ownerName: cfg.ownerName, ownerIds: cfg.ownerIds };
 
+  // Threads with a reply in flight. The maintenance loop must not distil a thread whose turn
+  // is still being written, or the extractor sees half a conversation.
+  const busy = new Set<string>();
+
   // One handler for every transport: identity → event → run → reply → maybe distil.
   const handler = async (message: Incoming, send: (chatId: string, text: string) => Promise<void>) => {
     const result = ingest(deps, message);
@@ -645,6 +650,7 @@ async function cmdServe(args: string[]): Promise<number> {
       return;
     }
     dim(`event #${result.eventId} ${result.speaker} @ ${result.thread}`);
+    busy.add(result.thread);
     try {
       const taskId = store.createTask(message.text, cfg.workspace, result.thread);
       const reply = await runTask(
@@ -664,8 +670,47 @@ async function cmdServe(args: string[]): Promise<number> {
       const reason = error instanceof Error ? error.message : String(error);
       console.error(`failed to handle message: ${reason}`);
       await send(message.chatId, `执行失败：${reason.slice(0, 300)}`).catch(() => {});
+    } finally {
+      busy.delete(result.thread);
     }
   };
+
+  // Background maintenance: the batch trigger above only fires at N turns, so a two-message
+  // conversation would never be extracted. This tick closes that gap.
+  const maintenanceMinutes = Number(process.env.PI_RT_MAINTENANCE_MINUTES ?? 5);
+  const maintenanceEnabled = !args.includes("--no-maintenance") && maintenanceMinutes > 0;
+  const maintenanceTimer = maintenanceEnabled
+    ? setInterval(() => {
+        // One summary line per tick: per-thread logging buries the transcript once a few
+        // idle threads exist.
+        void runMaintenance({
+          idleThreads: () => store.idleEventThreads(cfg.idleMinutes),
+          distill: async (thread) => {
+            await runDistill(store, memory, cfg, thread, 20, dim);
+          },
+          prune: () => {
+            const state = new ShortStateStore(DATA_DIR);
+            try {
+              return state.prune();
+            } finally {
+              state.close();
+            }
+          },
+          busy,
+        })
+          .then((report) => {
+            const parts: string[] = [];
+            if (report.distilled.length > 0) parts.push(`提炼 ${report.distilled.length} 个闲置线程`);
+            if (report.failed.length > 0) parts.push(`${report.failed.length} 个失败`);
+            if (report.pruned > 0) parts.push(`清理 ${report.pruned} 条过期短状态`);
+            if (parts.length > 0) dim(`[maintenance] ${parts.join("，")}`);
+          })
+          .catch((error) => dim(`[maintenance] ${error instanceof Error ? error.message : String(error)}`));
+      }, maintenanceMinutes * 60_000)
+    : null;
+  if (maintenanceEnabled) {
+    dim(`维护循环已启用：每 ${maintenanceMinutes} 分钟提炼闲置线程（闲置阈值 ${cfg.idleMinutes} 分钟）`);
+  }
 
   const controller = new AbortController();
   process.on("SIGINT", () => controller.abort());
@@ -729,6 +774,7 @@ async function cmdServe(args: string[]): Promise<number> {
     sender!.close();
     return 0;
   } finally {
+    if (maintenanceTimer) clearInterval(maintenanceTimer);
     memory.close();
     members.close();
     store.close();

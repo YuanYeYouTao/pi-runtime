@@ -669,7 +669,36 @@ pi-rt compact --dry-run    # show what would go
 pi-rt compact --vacuum     # delete noise, truncate oversized payloads, reclaim space
 ```
 
-## Evaluation
+## Running as a server
+
+`pi-rt serve` answers messages as they arrive and runs a maintenance tick in the background.
+
+The gap it closes: distillation normally fires **after N turns** (default 10), so a conversation
+of two or three messages never reaches the threshold and its memory is never extracted — the
+user said something worth remembering and it was silently dropped. A real IM conversation is
+mostly short ones.
+
+```
+every PI_RT_MAINTENANCE_MINUTES (default 5):
+  prune expired short-state slots
+  for each thread idle for PI_RT_IDLE_MINUTES (default 15):
+    distil it, unless a reply for that thread is in flight
+```
+
+Two guards that matter:
+
+- **Never distil a thread mid-reply.** `src/maintenance.ts` takes a `busy` set that the message
+  handler holds while a task runs; without it the extractor can see a half-written turn.
+- **One failure must not abort the tick.** A thread whose distillation throws is recorded and
+  skipped, so one bad conversation cannot block every other.
+
+`pi-rt serve --no-maintenance` disables the loop (useful when a separate `pi-rt worker` owns
+distillation).
+
+Verified end-to-end: two webhook messages (below the 10-turn threshold) in a fresh thread were
+extracted by the next tick, producing `trip_budget_cny` without any manual command.
+
+## Evaluating memory
 
 Memory extraction is measured, not assumed: 28 hand-authored cases in [`eval/cases.json`](eval/cases.json) — 13 positive, 7 negative, 8 state transitions — scored by semantic assertions rather than key identity, with each case isolated in its own database.
 

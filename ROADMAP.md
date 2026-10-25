@@ -135,6 +135,16 @@ Each phase maps to a capability the Agent Harness job postings actually test. Th
 
 > 删之前先备份：`data/runtime.db.bak-before-compact`
 
+## Phase 2.9 — serve 的闲置提炼 ✅
+
+- [x] `src/maintenance.ts`：一次 tick = 清理过期短状态 + 提炼闲置线程
+- [x] `busy` 锁：正在回复的线程不会被提炼（避免看到半截对话）
+- [x] 单个线程失败不影响其他线程；prune 失败也不阻断提炼
+- [x] `PI_RT_MAINTENANCE_MINUTES`（默认 5）+ `--no-maintenance`
+- [x] 每 tick 只打一行汇总（逐线程日志会把输出淹没）
+- [x] 端到端：两条 webhook 消息（低于 10 轮阈值）→ 下一 tick 自动提炼出 `trip_budget_cny`
+- [x] 副作用清理：测试线程的记忆已从开发库移除
+
 ## Phase 3 — 工具与子 Agent
 
 - [ ] 自定义工具注册（JSON Schema + 结果回传契约）
