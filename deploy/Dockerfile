@@ -10,7 +10,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 # --ignore-scripts: nothing here needs a native build step, and skipping postinstall keeps the
 # image reproducible (verified locally: pi's CLI and the Lark SDK both land with this flag).
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --registry=$NPM_REGISTRY
 
 FROM node:24-bookworm-slim
 # git/curl are for the agent's own tools when sandbox mode is `full`; harmless otherwise.

@@ -6,6 +6,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     image: pi-runtime:latest
     container_name: pi-rt
     restart: unless-stopped
