@@ -7,7 +7,9 @@
 import { execSync } from "node:child_process";
 
 const PATTERNS = [
-  { name: "公网 IPv4", re: /\b(?!10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)(?:\d{1,3}\.){3}\d{1,3}\b/ },
+  // 0.0.0.0 and 255.255.255.255 are bind/broadcast addresses, not hosts: documentation about
+  // listening on all interfaces should not look like a leaked server address.
+  { name: "公网 IPv4", re: /\b(?!0\.0\.0\.0\b|255\.255\.255\.255\b|10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)(?:\d{1,3}\.){3}\d{1,3}\b/ },
   { name: "飞书 open_id", re: /\bou_[0-9a-f]{16,}\b/ },
   { name: "飞书 app_id", re: /\bcli_[a-z0-9]{10,}\b/ },
   { name: "飞书 app_secret", re: /\b[A-Za-z0-9]{16,}\b(?=.*app_secret)|app_secret\s*[=:]\s*\S{8,}/i },
