@@ -14,7 +14,7 @@ import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
 import { withRetry } from "./retry.ts";
 import { PI_CLI, piArgs, piEnv } from "./config.ts";
-import { renderPersonaPrompt } from "./persona.ts";
+import { renderContractsPrompt, renderPersonaPrompt } from "./persona.ts";
 import type { RuntimeConfig } from "./config.ts";
 
 export type RunHooks = {
@@ -301,6 +301,11 @@ async function runAttempt(
     const personaPrompt = renderPersonaPrompt(cfg.dataDir);
     if (personaPrompt) {
       segments.push({ kind: "instructions", stability: "frozen", body: personaPrompt, meta: { role: "soul" } });
+    }
+    // Discipline right after voice: how it works must not be negotiable by how it sounds.
+    const contractsPrompt = renderContractsPrompt(cfg.dataDir);
+    if (contractsPrompt) {
+      segments.push({ kind: "instructions", stability: "frozen", body: contractsPrompt, meta: { role: "contracts" } });
     }
     segments.push({
       kind: "instructions",

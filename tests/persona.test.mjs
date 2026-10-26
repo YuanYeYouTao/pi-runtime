@@ -2,6 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  DEFAULT_CONTRACTS,
+  DEFAULT_CONTRACTS_LIMIT,
+  contractsUsage,
+  ensureStanding,
+  readContracts,
+  renderContractsPrompt,
+  standingUsage,
+  writeContracts,
   DEFAULT_SOUL,
   PERSONA_DIR,
   SOUL_FILE,
@@ -80,6 +88,28 @@ check("seeded body readable", (readSoul(dir) ?? "").includes("怎么说话"));
 // 8) default soul stays inside its budget
 check("default soul fits budget", [...DEFAULT_SOUL].length < 4000, String([...DEFAULT_SOUL].length));
 check("default soul has examples", DEFAULT_SOUL.includes("示例"));
+
+// 9) the second standing file: discipline is separate from voice
+{
+  const second = mkdtempSync(path.join(tmpdir(), "pi-contracts-"));
+  check("no contracts before seeding", renderContractsPrompt(second) === "");
+  const written = ensureStanding(second);
+  check("seeds two files", written.length === 2, String(written.length));
+  check("contracts seeded", (readContracts(second) ?? "").length > 0);
+  check("contracts render has header", renderContractsPrompt(second).includes("执行纪律"));
+  check("contracts budget separate", contractsUsage(second)?.limit === DEFAULT_CONTRACTS_LIMIT);
+  writeContracts(second, "字".repeat(80));
+  const cut = renderContractsPrompt(second, 60);
+  check("contracts truncate announced", cut.includes("已截断"), cut.slice(-60));
+  check("standingUsage lists both roles", standingUsage(second).length === 2);
+  check("default contracts fit budget", [...DEFAULT_CONTRACTS].length < DEFAULT_CONTRACTS_LIMIT);
+  check("contracts mention evidence rule", DEFAULT_CONTRACTS.includes("工具回执"));
+  try {
+    rmSync(second, { recursive: true, force: true });
+  } catch {
+    /* handle stays open briefly on Windows */
+  }
+}
 
 try {
   rmSync(dir, { recursive: true, force: true });

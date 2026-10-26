@@ -15,7 +15,7 @@ import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { ReminderStore, extractReminderDirectives, parseWhen } from "./reminders.ts";
-import { DEFAULT_SOUL_LIMIT, PERSONA_DIR, SOUL_FILE, ensureSoul, personaUsage, readSoul, soulPath, writeSoul } from "./persona.ts";
+import { DEFAULT_CONTRACTS_LIMIT, DEFAULT_SOUL_LIMIT, PERSONA_DIR, SOUL_FILE, contractsPath, contractsUsage, ensureStanding, personaUsage, readContracts, readSoul, soulPath, standingUsage, writeContracts, writeSoul } from "./persona.ts";
 import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
 import { NOISE_TYPES } from "./event-log.ts";
 import { runMaintenance } from "./maintenance.ts";
@@ -1304,27 +1304,30 @@ async function main(): Promise<number> {
     case "persona": {
       const sub = rest[0] ?? "show";
       if (sub === "init") {
-        const file = ensureSoul(DATA_DIR) ?? writeSoul(DATA_DIR, readSoul(DATA_DIR) ?? "");
-        console.log(`人格文件：${file}`);
+        const written = ensureStanding(DATA_DIR);
+        console.log(written.length > 0 ? written.map((file) => `已生成：${file}`).join("\n") : "两个人格文件都已存在");
         return 0;
       }
       if (sub === "usage") {
-        const usage = personaUsage(DATA_DIR, DEFAULT_SOUL_LIMIT);
-        console.log(usage ? `${usage.path}  ${usage.chars}/${usage.limit} 字符（${usage.percent}%）` : "还没有人格文件，运行 `persona init`");
-        return 0;
+        const usage = standingUsage(DATA_DIR);
+        for (const entry of usage) console.log(`${entry.path}  ${entry.chars}/${entry.limit} 字符（${entry.percent}%）`);
+        return usage.length > 0 ? 0 : 1;
       }
       if (sub === "edit") {
-        console.log(`用编辑器打开：${soulPath(DATA_DIR)}`);
+        console.log(`人格：${soulPath(DATA_DIR)}`);
+        console.log(`纪律：${contractsPath(DATA_DIR)}`);
         return 0;
       }
-      const body = readSoul(DATA_DIR);
-      if (!body) {
-        console.log(`还没有人格文件。运行 \`node src/cli.ts persona init\` 生成默认人格（${DEFAULT_SOUL_LIMIT} 字符上限）`);
+      const soul = readSoul(DATA_DIR);
+      const contracts = readContracts(DATA_DIR);
+      if (!soul && !contracts) {
+        console.log(`还没有人格文件。运行 \`node src/cli.ts persona init\` 生成默认人格（${DEFAULT_SOUL_LIMIT} 字符）与执行纪律（${DEFAULT_CONTRACTS_LIMIT} 字符）`);
         return 1;
       }
-      const usage = personaUsage(DATA_DIR, DEFAULT_SOUL_LIMIT)!;
-      console.log(`# ${PERSONA_DIR}/${SOUL_FILE}  ${usage.chars}/${usage.limit} 字符（${usage.percent}%）\n`);
-      console.log(body);
+      const usage = standingUsage(DATA_DIR);
+      console.log(`# ${usage.map((u) => `${u.role} ${u.chars}/${u.limit}（${u.percent}%）`).join(" · ")}\n`);
+      if (soul) console.log(soul);
+      if (contracts) console.log(`\n---\n\n${contracts}`);
       return 0;
     }
     case "remind": {
