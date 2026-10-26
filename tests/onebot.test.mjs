@@ -1,4 +1,4 @@
-import { parseOneBotEvent, buildSendBody, sendTargetFromChatId, toPlainText } from "../src/channels/onebot.ts";
+import { parseOneBotEvent, buildSendBody, sendTargetFromChatId, toPlainText, shouldAnswer } from "../src/channels/onebot.ts";
 
 let pass = 0;
 let fail = 0;
@@ -98,6 +98,20 @@ const group = (overrides = {}) => ({
   check("private target", JSON.stringify(sendTargetFromChatId("user:999")) === JSON.stringify({ kind: "private", id: "999" }));
   check("group target", JSON.stringify(sendTargetFromChatId("group:555")) === JSON.stringify({ kind: "group", id: "555" }));
   check("legacy qq: prefix still parses", JSON.stringify(sendTargetFromChatId("qq:group:555")) === JSON.stringify({ kind: "group", id: "555" }));
+}
+
+// 11) group messages answer on mention, exemption, or wake word
+{
+  const group = (text, addressed) => ({ chatType: "group", chatId: "group:1", text, addressed });
+  check("dm always answers", shouldAnswer({ chatType: "dm", chatId: "user:1", text: "hi" }) === true);
+  check("group ignores plain chatter", shouldAnswer(group("今天吃什么", false)) === false);
+  check("group answers a real mention", shouldAnswer(group("随便", true)) === true);
+  check("exempt group answers without mention", shouldAnswer(group("随便", false), { noMentionGroups: new Set(["group:1"]) }) === true);
+  check("other group stays silent", shouldAnswer(group("随便", false), { noMentionGroups: new Set(["group:2"]) }) === false);
+  check("wake word answers", shouldAnswer(group("油桃 你在吗", false), { wakeWords: ["油桃"] }) === true);
+  check("wake word is case exact for CJK", shouldAnswer(group("油桃", false), { wakeWords: ["桃"] }) === true);
+  check("no wake word match", shouldAnswer(group("油桃", false), { wakeWords: ["小桃"] }) === false);
+  check("empty wake word never matches", shouldAnswer(group("任意", false), { wakeWords: [""] }) === false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

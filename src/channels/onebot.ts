@@ -238,3 +238,21 @@ export class OneBotClient {
     });
   }
 }
+/**
+ * Decide whether an incoming message deserves an answer.
+ *
+ * Three ways a group message counts as addressed: a real `at` segment, an explicit
+ * per-group exemption, or the bot's name appearing in the text. The third is what people
+ * actually expect — "@-ing is a UI, saying the name is a habit" — but it has to stay
+ * opt-in, because a bot that answers every mention of its name becomes noise.
+ */
+export function shouldAnswer(
+  message: { chatType: string; addressed?: boolean; chatId: string; text: string },
+  options: { noMentionGroups?: Set<string>; wakeWords?: string[] } = {},
+): boolean {
+  if (message.chatType !== "group") return true;
+  if (message.addressed) return true;
+  if (options.noMentionGroups?.has(message.chatId)) return true;
+  const words = options.wakeWords ?? [];
+  return words.some((word) => word.length > 0 && message.text.includes(word));
+}

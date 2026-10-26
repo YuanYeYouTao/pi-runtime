@@ -24,7 +24,7 @@ import { exportMemoryToGit } from "./memory-git.ts";
 import { summarizeToolCalls, listMcpServers, formatToolReport } from "./tools-report.ts";
 import { buildSpanTree, formatSpanTree } from "./trace.ts";
 import { describePolicy } from "./sandbox.ts";
-import { OneBotClient, oneBotToIncoming, sendTargetFromChatId } from "./channels/onebot.ts";
+import { OneBotClient, oneBotToIncoming, sendTargetFromChatId, shouldAnswer } from "./channels/onebot.ts";
 import { Gate } from "./gate.ts";
 import { buildDigest, buildSplitPrompt, canSpawn, parseSubtasks, runWithLimit } from "./subagent.ts";
 import type { ChildResult } from "./subagent.ts";
@@ -930,12 +930,16 @@ async function cmdServe(args: string[]): Promise<number> {
       .filter(Boolean)
       .map((id) => (id.startsWith("group:") ? id : `group:${id}`)),
   );
+  const wakeWords = (process.env.QQ_WAKE_WORDS ?? "")
+    .split(",")
+    .map((word) => word.trim())
+    .filter(Boolean);
   // One handler for every transport: identity → event → run → reply → maybe distil.
   const handler = async (message: Incoming, send: (chatId: string, text: string) => Promise<void>) => {
     // In a group, every message reaches us. Answering all of them is noisy and expensive, so we
     // stay quiet unless the bot was mentioned (DMs are always addressed).
 
-    if (message.chatType === "group" && message.addressed === false && !noMentionGroups.has(message.chatId)) {
+    if (!shouldAnswer(message, { noMentionGroups, wakeWords })) {
       dim(`群消息未 @ 我，跳过：${message.text.slice(0, 20)}｜at=[${(message.mentions ?? []).join(",")}]`);
       return;
     }
