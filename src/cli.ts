@@ -15,6 +15,7 @@ import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
 import { ReminderStore, extractReminderDirectives, parseWhen } from "./reminders.ts";
+import { enforceBrevity } from "./brevity.ts";
 import { DEFAULT_CONTRACTS_LIMIT, DEFAULT_SOUL_LIMIT, PERSONA_DIR, SOUL_FILE, contractsPath, contractsUsage, ensureStanding, personaUsage, readContracts, readSoul, soulPath, standingUsage, writeContracts, writeSoul } from "./persona.ts";
 import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
 import { NOISE_TYPES } from "./event-log.ts";
@@ -1072,7 +1073,12 @@ async function cmdServe(args: string[]): Promise<number> {
               if (reminderStore.findDuplicate(thread, directive.text, dueAt)) continue;
               reminderStore.add({ thread, channel: incoming.channel, chatId: incoming.chatId, text: directive.text, dueAt });
             }
-            await client.send(sendTargetFromChatId(message.chatId), cleaned);
+            // Length is a product decision, not a model preference: SOUL.md says "短句" and the
+            // model still wrote 200-character answers. The cap is mechanical, and it steps aside
+            // when the user actually asked for detail.
+            const brevity = enforceBrevity(cleaned, incoming.chatType === "group" ? "group" : "dm", incoming.text);
+            if (brevity.trimmed) dim(`[简短化 ${cleaned.length} → ${brevity.text.length} 字：${brevity.reason ?? ""}]`);
+            await client.send(sendTargetFromChatId(message.chatId), brevity.text);
           }),
         controller.signal,
       );
