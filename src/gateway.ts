@@ -16,6 +16,8 @@ export type Incoming = {
    * was mentioned. DMs are always addressed.
    */
   addressed?: boolean;
+  /** QQ ids the message @-mentioned, carried through for diagnostics only. */
+  mentions?: string[];
 };
 
 export type GatewayDeps = {

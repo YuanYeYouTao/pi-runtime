@@ -9,6 +9,8 @@ export type OneBotMessage = {
   text: string;
   /** Group messages count only when the bot was @-mentioned; private ones always do. */
   addressed: boolean;
+  /** QQ ids of everyone @-mentioned, for diagnosing "it ignored my mention". */
+  mentions: string[];
 };
 
 type Segment = { type?: string; data?: Record<string, unknown> };
@@ -63,6 +65,12 @@ export function parseOneBotEvent(payload: any, options: { botUin?: string } = {}
   const mentioned = segments.some(
     (segment) => segment.type === "at" && (options.botUin ? String(segment.data?.qq) === options.botUin : true),
   );
+  // Kept for diagnostics: "did the user really @ us, or type the name as plain text?" is the
+  // first question whenever a group mention gets ignored.
+  const mentions = segments
+    .filter((segment) => segment.type === "at")
+    .map((segment) => String(segment.data?.qq ?? ""))
+    .filter(Boolean);
   const isGroup = payload.message_type === "group";
   if (!isGroup && payload.message_type !== "private") return null;
 
@@ -78,6 +86,7 @@ export function parseOneBotEvent(payload: any, options: { botUin?: string } = {}
     nickname: payload.sender?.card || payload.sender?.nickname || undefined,
     text,
     addressed: isGroup ? mentioned : true,
+    mentions,
   };
 }
 
@@ -97,6 +106,7 @@ export function oneBotToIncoming(message: OneBotMessage) {
     text: message.text,
     messageId: message.messageId,
     addressed: message.addressed,
+    mentions: message.mentions,
   };
 }
 
