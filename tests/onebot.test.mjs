@@ -1,4 +1,4 @@
-import { parseOneBotEvent, buildSendBody } from "../src/channels/onebot.ts";
+import { parseOneBotEvent, buildSendBody, sendTargetFromChatId, toPlainText } from "../src/channels/onebot.ts";
 
 let pass = 0;
 let fail = 0;
@@ -28,14 +28,14 @@ const group = (overrides = {}) => ({
     { botUin: BOT },
   );
   check("private is addressed", parsed?.addressed === true);
-  check("private chat id", parsed?.chatId === "qq:user:999", parsed?.chatId);
+  check("private chat id has no channel prefix", parsed?.chatId === "user:999", parsed?.chatId);
 }
 
 // 2) group without an @ is not addressed
 {
   const parsed = parseOneBotEvent(group(), { botUin: BOT });
   check("plain group message is not addressed", parsed?.addressed === false);
-  check("group chat id", parsed?.chatId === "qq:group:555", parsed?.chatId);
+  check("group chat id has no channel prefix", parsed?.chatId === "group:555", parsed?.chatId);
   check("text is extracted", parsed?.text === "帮我记一下");
   check("nickname is carried", parsed?.nickname === "张三");
 }
@@ -80,6 +80,24 @@ const group = (overrides = {}) => ({
   const grp = buildSendBody({ kind: "group", id: "555" }, "hi");
   check("private endpoint", priv.endpoint === "send_private_msg" && priv.body.user_id === 999, JSON.stringify(priv));
   check("group endpoint", grp.endpoint === "send_group_msg" && grp.body.group_id === 555, JSON.stringify(grp));
+}
+
+// 9) markdown is stripped for QQ plain text
+{
+  const raw = "**结论**：可以。\n\n## 步骤\n- 第一步 `npm ci`\n- 第二步";
+  const plain = toPlainText(raw);
+  check("bold markers removed", !plain.includes("**"), plain);
+  check("heading marker removed", !plain.includes("##"), plain);
+  check("inline code unwrapped", plain.includes("npm ci") && !plain.includes("`"), plain);
+  check("bullets preserved as text", plain.includes("· 第一步"), plain);
+  check("content survives", plain.includes("结论") && plain.includes("第二步"));
+}
+
+// 10) chat id round-trips to a send target
+{
+  check("private target", JSON.stringify(sendTargetFromChatId("user:999")) === JSON.stringify({ kind: "private", id: "999" }));
+  check("group target", JSON.stringify(sendTargetFromChatId("group:555")) === JSON.stringify({ kind: "group", id: "555" }));
+  check("legacy qq: prefix still parses", JSON.stringify(sendTargetFromChatId("qq:group:555")) === JSON.stringify({ kind: "group", id: "555" }));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

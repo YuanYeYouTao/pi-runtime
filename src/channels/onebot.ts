@@ -71,7 +71,7 @@ export function parseOneBotEvent(payload: any, options: { botUin?: string } = {}
 
   return {
     kind: isGroup ? "group" : "private",
-    chatId: isGroup ? `qq:group:${groupId}` : `qq:user:${userId}`,
+    chatId: isGroup ? `group:${groupId}` : `user:${userId}`,
     userId,
     groupId,
     messageId: String(payload.message_id ?? ""),
@@ -106,6 +106,21 @@ export function sendTargetFromChatId(chatId: string): SendTarget {
   return { kind: scope === "group" ? "group" : "private", id };
 }
 
+/**
+ * QQ messages are plain text: `**bold**` and `# heading` show up as literal characters.
+ * Strip the markers but keep the content, so the reply reads the same on both sides.
+ */
+export function toPlainText(text: string): string {
+  return text
+    .replace(/```[a-zA-Z]*\n?([\s\S]*?)```/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "· ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export type SendTarget = { kind: "private" | "group"; id: string };
 
 /** The HTTP body OneBot expects for a text reply. */
@@ -118,7 +133,11 @@ export function buildSendBody(target: SendTarget, text: string): { endpoint: str
 export type OneBotOptions = {
   wsUrl: string;
   httpUrl: string;
+  /** Fallback token, used when the side-specific token is absent. */
   accessToken?: string;
+  /** Some implementations (SnowLuma) issue a different token per adapter. */
+  wsToken?: string;
+  httpToken?: string;
   botUin?: string;
   allowedUsers?: string[];
   allowedGroups?: string[];
@@ -140,12 +159,13 @@ export class OneBotClient {
 
   private headers(): Record<string, string> {
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (this.options.accessToken) headers.authorization = `Bearer ${this.options.accessToken}`;
+    const token = this.options.httpToken ?? this.options.accessToken;
+    if (token) headers.authorization = `Bearer ${token}`;
     return headers;
   }
 
   async send(target: SendTarget, text: string): Promise<void> {
-    const { endpoint, body } = buildSendBody(target, text);
+    const { endpoint, body } = buildSendBody(target, toPlainText(text));
     const response = await fetch(`${this.options.httpUrl.replace(/\/$/, "")}/${endpoint}`, {
       method: "POST",
       headers: this.headers(),
@@ -174,8 +194,9 @@ export class OneBotClient {
 
   private session(onMessage: (message: OneBotMessage) => Promise<void>, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = this.options.accessToken
-        ? `${this.options.wsUrl}${this.options.wsUrl.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(this.options.accessToken)}`
+      const token = this.options.wsToken ?? this.options.accessToken;
+      const url = token
+        ? `${this.options.wsUrl}${this.options.wsUrl.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`
         : this.options.wsUrl;
       const socket = new WebSocket(url);
 

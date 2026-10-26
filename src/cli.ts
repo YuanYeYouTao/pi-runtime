@@ -1020,6 +1020,8 @@ async function cmdServe(args: string[]): Promise<number> {
         wsUrl: process.env.QQ_WS_URL ?? "ws://127.0.0.1:3001",
         httpUrl: process.env.QQ_HTTP_URL ?? "http://127.0.0.1:3001",
         accessToken: process.env.QQ_ACCESS_TOKEN,
+        wsToken: process.env.QQ_WS_TOKEN,
+        httpToken: process.env.QQ_HTTP_TOKEN,
         botUin: process.env.QQ_BOT_UIN,
         allowedUsers: process.env.QQ_ALLOW_USERS?.split(",").map((id) => id.trim()).filter(Boolean),
         allowedGroups: process.env.QQ_ALLOW_GROUPS?.split(",").map((id) => id.trim()).filter(Boolean),
