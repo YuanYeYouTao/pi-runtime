@@ -65,6 +65,19 @@ const check = (name, ok, extra = "") => {
   check("allows a mount point like /workspace", checkWorkspace(path.join(root, "workspace")).ok === true);
   check("rejects system directories", ["etc", "usr", "var", "root", "home"].every((dir) => checkWorkspace(path.join(root, dir)).ok === false));
   check("accepts a project directory", checkWorkspace(process.cwd()).ok === true, process.cwd());
+// Regression: GitHub Actions checks the repo out under /home/runner/work, and "put the project
+// in your home directory" is the most common Linux layout. That must not read as a system dir.
+check(
+  "accepts a project inside the home directory",
+  checkWorkspace(path.join(os.homedir(), "projects", "demo")).ok === true,
+  path.join(os.homedir(), "projects", "demo"),
+);
+check(
+  "accepts an application directory under /opt",
+  checkWorkspace(path.join(root, "opt", "pi-runtime")).ok === true,
+  path.join(root, "opt", "pi-runtime"),
+);
+check("still rejects a foreign home", checkWorkspace(path.join(root, "home", "someone-else")).ok === false);
   check("accepts a nested path", checkWorkspace(path.join(root, "a", "b", "c")).ok === true);
 }
 

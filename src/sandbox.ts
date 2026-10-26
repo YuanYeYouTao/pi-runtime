@@ -135,12 +135,19 @@ export function checkWorkspace(workspace: string): WorkspaceVerdict {
   if (segments.length === 0) return { ok: false, reason: `工作区不能是根目录：${resolved}` };
 
   const first = segments[0].toLowerCase();
+  // `opt` is deliberately absent: applications legitimately live there, and this runtime's own
+  // deployment uses /opt/pi-runtime — blocking it made the guard reject its own install.
   const systemDirs = new Set([
     "etc", "usr", "bin", "sbin", "lib", "lib32", "lib64", "boot", "dev", "proc", "sys",
-    "var", "root", "home", "opt", "run",
+    "var", "root", "home", "run",
     "windows", "program files", "program files (x86)", "programdata", "system32",
   ]);
-  if (systemDirs.has(first)) {
+  // A project checked out under the user's home (~/projects/foo) is the most common layout on
+  // Linux, and GitHub Actions puts the repo under /home/runner/work. Rejecting everything
+  // whose first segment is a system directory rejected those too, so only the *bare* system
+  // directory and paths outside our own home stay blocked.
+  const insideOwnHome = resolved.startsWith(home + path.sep);
+  if (systemDirs.has(first) && !insideOwnHome) {
     return { ok: false, reason: `工作区不能是系统目录：${resolved}` };
   }
 
