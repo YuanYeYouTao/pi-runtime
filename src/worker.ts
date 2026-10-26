@@ -14,6 +14,7 @@ import { Gate } from "./gate.ts";
 import { summarizeThread } from "./summary.ts";
 import { withRetry } from "./retry.ts";
 import { PI_CLI, piArgs, piEnv } from "./config.ts";
+import { renderPersonaPrompt } from "./persona.ts";
 import type { RuntimeConfig } from "./config.ts";
 
 export type RunHooks = {
@@ -294,8 +295,13 @@ async function runAttempt(
       }
     }
 
-    // Order is the contract: instructions → memory → short state → summary → window → current.
+    // Order is the contract: persona → instructions → memory → short state → summary → window → current.
     const segments: ComposeSegment[] = [];
+    // Who it is comes before what it was told: persona is the lens the rest is read through.
+    const personaPrompt = renderPersonaPrompt(cfg.dataDir);
+    if (personaPrompt) {
+      segments.push({ kind: "instructions", stability: "frozen", body: personaPrompt, meta: { role: "soul" } });
+    }
     segments.push({
       kind: "instructions",
       stability: "frozen",
