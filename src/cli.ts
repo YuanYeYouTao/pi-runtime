@@ -14,6 +14,7 @@ import { PiRpc } from "./rpc.ts";
 import { runTask } from "./worker.ts";
 import { Members } from "./members.ts";
 import { ShortStateStore, parseTtl } from "./short-state.ts";
+import { ReminderStore, extractReminderDirectives, parseWhen } from "./reminders.ts";
 import { CalibrationStore, charsPerTokenFrom, DEFAULT_CHARS_PER_TOKEN, MIN_SAMPLES } from "./calibration.ts";
 import { NOISE_TYPES } from "./event-log.ts";
 import { runMaintenance } from "./maintenance.ts";
@@ -1027,10 +1028,37 @@ async function cmdServe(args: string[]): Promise<number> {
         allowedGroups: process.env.QQ_ALLOW_GROUPS?.split(",").map((id) => id.trim()).filter(Boolean),
       });
       console.log(`qq (onebot) -> ${process.env.QQ_WS_URL ?? "ws://127.0.0.1:3001"} - ctrl+c to stop`);
+      // Reminders are the one thing the runtime pushes without being spoken to, so the loop
+      // owns its own timer and reuses the same send path as a normal reply.
+      const reminderStore = new ReminderStore(DATA_DIR);
+      const stopReminders = setInterval(() => {
+        void (async () => {
+          for (const reminder of reminderStore.due()) {
+            try {
+              await client.send(sendTargetFromChatId(reminder.chatId), `⏰ ${reminder.text}`);
+              reminderStore.markFired(reminder.id);
+            } catch (error) {
+              console.error(`reminder ${reminder.id} 发送失败：${(error as Error).message}`);
+            }
+          }
+        })();
+      }, 30_000);
+      reminderStore.pending().length > 0 &&
+        console.log(`待触发提醒 ${reminderStore.pending().length} 条`);
+      controller.signal.addEventListener("abort", () => clearInterval(stopReminders));
       await client.run(
         (message) =>
           handler(oneBotToIncoming(message) as Incoming, async (_chatId, text) => {
-            await client.send(sendTargetFromChatId(message.chatId), text);
+            const incoming = oneBotToIncoming(message);
+            const thread = `${incoming.channel}:${incoming.chatId}`;
+            const { reminders: directives, cleaned } = extractReminderDirectives(text);
+            for (const directive of directives) {
+              const dueAt = parseWhen(directive.when);
+              if (!dueAt || dueAt.getTime() <= Date.now()) continue;
+              if (reminderStore.findDuplicate(thread, directive.text, dueAt)) continue;
+              reminderStore.add({ thread, channel: incoming.channel, chatId: incoming.chatId, text: directive.text, dueAt });
+            }
+            await client.send(sendTargetFromChatId(message.chatId), cleaned);
           }),
         controller.signal,
       );
@@ -1259,6 +1287,26 @@ async function main(): Promise<number> {
       return cmdThread(rest);
     case "state":
       return cmdState(rest);
+    case "remind": {
+      const store = new ReminderStore(DATA_DIR);
+      const sub = rest[0] ?? "list";
+      if (sub === "cancel") {
+        const id = Number(rest[1]);
+        const ok = Number.isInteger(id) && store.cancel(id);
+        console.log(ok ? `已取消 #${id}` : `没有可取消的 #${rest[1]}`);
+        return ok ? 0 : 1;
+      }
+      const rows = store.pending();
+      if (rows.length === 0) {
+        console.log("没有待触发的提醒");
+        return 0;
+      }
+      for (const row of rows) {
+        const local = new Date(new Date(row.dueAt).getTime() + 8 * 3_600_000).toISOString().slice(0, 16).replace("T", " ");
+        console.log(`#${row.id}  ${local}  [${row.channel}] ${row.text}`);
+      }
+      return 0;
+    }
     case "calibrate":
       return cmdCalibrate(rest);
     case "compact":

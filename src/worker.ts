@@ -304,6 +304,11 @@ async function runAttempt(
         "需要跨轮记住的**临时**信息（端口、分支、待办链接、进度），在回复最后单独一行写：",
         "<!--state: key=value; ttl=12h-->",
         "不要用它记长期事实（那些交给记忆系统），也永远不要写入密码/密钥/token。",
+        "",
+        "要**在将来某个时刻主动提醒用户**时，在回复最后单独一行写：",
+        "<!--remind: 2026-10-27 15:00 | 提醒的内容-->",
+        "时间是用户的本地时间（东八区），也可以写 `30分钟`、`2小时`、`1天` 这样的相对时间。",
+        "用户要求提醒时直接答应并写上这条指令——你确实有这个能力，不要说做不到。",
       ].join("\n"),
     });
     if (injected.text) segments.push({ kind: "memory", stability: "stable", body: injected.text, meta: { ids: injected.ids } });
