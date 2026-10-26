@@ -1,5 +1,11 @@
 # QQ 接入（OneBot v11）
 
+> **两种情况分开读：**
+>
+> - **在有桌面的机器上跑**（Windows 本机）→ 读本文件即可，用 NapCat 或 SnowLuma 都行
+> - **在无桌面的云服务器上跑**（要 7×24）→ 读 [`qq-desktop/README.md`](qq-desktop/README.md)，
+>   那份文档用 noVNC 造一块虚拟桌面，并记录了六个必踩的坑（端口绑定、登录态、token 分体等）
+
 QQ 没有官方提供给个人开发者的私有协议，所以这里走 **OneBot v11**：一个本地协议端（NapCat / Lagrange）
 负责登录 QQ，我们的运行时只和它说话 —— WebSocket 收消息，HTTP 发消息。
 
